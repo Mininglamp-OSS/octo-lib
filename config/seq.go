@@ -3,13 +3,12 @@ package config
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/gocraft/dbr/v2"
 )
 
 var seqMap = map[string]*Seq{}
-var seqLock sync.RWMutex
+var seqLock sync.Mutex
 var seqStep int64 = 1000 // 序列号步长
 
 // Seq Seq
@@ -18,30 +17,30 @@ type Seq struct {
 	MaxSeq int64
 }
 
-// GenSeq 生产序号
-func (c *Context) GenSeq(flag string) int64 {
-	seqLock.RLock()
-	seq := seqMap[flag]
-	seqLock.RUnlock()
+// GenSeq generates a monotonically increasing sequence number for the given flag.
+// It is safe for concurrent use.
+func (c *Context) GenSeq(flag string) (int64, error) {
+	seqLock.Lock()
+	defer seqLock.Unlock()
+
 	key := fmt.Sprintf("seq:%s", flag)
+	seq := seqMap[flag]
+
 	if seq == nil {
-		// seqStr, err := c.Cache().Get(key)
 		seqM, err := querySeqWithKey(c.DB(), key)
 		if err != nil {
-			panic(err)
+			return 0, fmt.Errorf("query seq for %q: %w", flag, err)
 		}
 		if seqM == nil {
-			var currSeq int64 = 1000000 // TODO: 为了兼容老的（以前放redis的）所以这里起始seq尽量大点
+			var currSeq int64 = 1000000
 			err = addOrUpdateSeq(c.DB(), &seqModel{
 				Key:    key,
 				Step:   int(seqStep),
 				MinSeq: currSeq + seqStep,
 			})
-			// err = c.Cache().Set(key, fmt.Sprintf("%d", seqStep))
 			if err != nil {
-				panic(err)
+				return 0, fmt.Errorf("init seq for %q: %w", flag, err)
 			}
-
 			seq = &Seq{
 				CurSeq: currSeq,
 				MaxSeq: currSeq + seqStep,
@@ -52,24 +51,23 @@ func (c *Context) GenSeq(flag string) int64 {
 				MaxSeq: seqM.MinSeq,
 			}
 		}
-		seqLock.Lock()
 		seqMap[flag] = seq
-		seqLock.Unlock()
 	}
-	if seq.CurSeq >= seq.MaxSeq { // 超过了最大序号
-		// err := c.Cache().Set(key, fmt.Sprintf("%d", seq.CurSeq+seqStep))
+
+	if seq.CurSeq >= seq.MaxSeq {
 		err := addOrUpdateSeq(c.DB(), &seqModel{
 			Key:    key,
 			Step:   int(seqStep),
 			MinSeq: seq.CurSeq + seqStep,
 		})
 		if err != nil {
-			panic(err)
+			return 0, fmt.Errorf("extend seq for %q: %w", flag, err)
 		}
 		seq.MaxSeq += seqStep
 	}
-	return atomic.AddInt64(&seq.CurSeq, 1)
 
+	seq.CurSeq++
+	return seq.CurSeq, nil
 }
 
 func addOrUpdateSeq(session *dbr.Session, m *seqModel) error {
