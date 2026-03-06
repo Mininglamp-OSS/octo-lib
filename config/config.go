@@ -630,11 +630,11 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.Qiniu.AccessKey = c.getString("qiniu.accessKey", c.Qiniu.AccessKey)
 	c.Qiniu.SecretKey = c.getString("qiniu.secretKey", c.Qiniu.SecretKey)
 	// 腾讯云COS
-	c.COS.Region = c.getString("cos.region", c.COS.Region)
-	c.COS.BucketName = c.getString("cos.bucketName", c.COS.BucketName)
 	c.COS.SecretID = c.getString("cos.secretID", c.COS.SecretID)
 	c.COS.SecretKey = c.getString("cos.secretKey", c.COS.SecretKey)
-	c.COS.DownloadURL = c.getString("cos.downloadURL", c.COS.DownloadURL)
+	c.COS.Bucket = c.getString("cos.bucket", c.COS.Bucket)
+	c.COS.Region = c.getString("cos.region", c.COS.Region)
+	c.COS.BucketURL = c.getString("cos.bucketURL", c.COS.BucketURL)
 
 	//#################### 短信服务 ####################
 	c.SMSCode = c.getString("smsCode", c.SMSCode)
@@ -1031,11 +1031,11 @@ type QiniuConfig struct {
 
 // COSConfig 腾讯云COS配置
 type COSConfig struct {
-	Region          string // COS 地域，例如 ap-guangzhou
-	BucketName      string // 存储桶名称，例如 dmwork-1250000000
-	SecretID        string // 腾讯云 SecretId
-	SecretKey       string // 腾讯云 SecretKey
-	DownloadURL     string // 文件下载基地址（CDN 或 COS 域名）
+	SecretID  string // 腾讯云 SecretId
+	SecretKey string // 腾讯云 SecretKey
+	Bucket    string // 存储桶名（如 my-bucket-12345678）
+	Region    string // 地域（如 ap-beijing）
+	BucketURL string // 访问域名（如 https://my-bucket-12345678.cos.example.com）
 }
 
 // UnismsConfig unisms短信
