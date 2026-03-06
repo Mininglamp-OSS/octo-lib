@@ -38,6 +38,8 @@ const (
 	FileServiceMinio FileService = "minio"
 	// FileServiceQiniu 七牛云上传服务
 	FileServiceQiniu FileService = "qiniu"
+	// FileServiceTencentCOS 腾讯云COS上传服务
+	FileServiceTencentCOS FileService = "tencentCOS"
 )
 
 func (u FileService) String() string {
@@ -136,6 +138,7 @@ type Config struct {
 	Minio       MinioConfig   // minio配置
 	Seaweed     SeaweedConfig // seaweedfs配置
 	Qiniu       QiniuConfig   // 七牛云配置
+	COS         COSConfig     // 腾讯云COS配置
 
 	// ---------- 短信运营商 ----------
 	SMSCode                string // 模拟的短信验证码
@@ -626,6 +629,12 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.Qiniu.BucketName = c.getString("qiniu.bucketName", c.Qiniu.BucketName)
 	c.Qiniu.AccessKey = c.getString("qiniu.accessKey", c.Qiniu.AccessKey)
 	c.Qiniu.SecretKey = c.getString("qiniu.secretKey", c.Qiniu.SecretKey)
+	// 腾讯云COS
+	c.COS.Region = c.getString("cos.region", c.COS.Region)
+	c.COS.BucketName = c.getString("cos.bucketName", c.COS.BucketName)
+	c.COS.SecretID = c.getString("cos.secretID", c.COS.SecretID)
+	c.COS.SecretKey = c.getString("cos.secretKey", c.COS.SecretKey)
+	c.COS.DownloadURL = c.getString("cos.downloadURL", c.COS.DownloadURL)
 
 	//#################### 短信服务 ####################
 	c.SMSCode = c.getString("smsCode", c.SMSCode)
@@ -1018,6 +1027,15 @@ type QiniuConfig struct {
 	BucketName string
 	AccessKey  string
 	SecretKey  string
+}
+
+// COSConfig 腾讯云COS配置
+type COSConfig struct {
+	Region          string // COS 地域，例如 ap-guangzhou
+	BucketName      string // 存储桶名称，例如 dmwork-1250000000
+	SecretID        string // 腾讯云 SecretId
+	SecretKey       string // 腾讯云 SecretKey
+	DownloadURL     string // 文件下载基地址（CDN 或 COS 域名）
 }
 
 // UnismsConfig unisms短信
