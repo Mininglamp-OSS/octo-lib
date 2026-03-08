@@ -20,7 +20,7 @@ func (t Type) Int() int {
 type Status int
 
 const (
-	Wait    Type = iota // 等待发布
+	Wait    Status = iota // 等待发布
 	Success             // 发布重构
 	Fail
 )
