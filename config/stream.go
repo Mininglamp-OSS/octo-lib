@@ -27,7 +27,11 @@ func (c *Context) IMStreamStart(req MessageStreamStartReq) (string, error) {
 	if resultMap == nil {
 		return "", errors.New("result is nil")
 	}
-	return resultMap["stream_no"].(string), nil
+	streamNo, ok := resultMap["stream_no"].(string)
+	if !ok {
+		return "", errors.New("stream_no field missing or not a string")
+	}
+	return streamNo, nil
 }
 
 func (c *Context) IMStreamEnd(req MessageStreamEndReq) error {

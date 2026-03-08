@@ -343,7 +343,7 @@ func (c *Context) IMClearConversationUnread(req ClearConversationUnreadReq) erro
 
 	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/conversations/setUnread", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
 	if err != nil {
-		return nil
+		return err
 	}
 	return c.handlerIMError(resp)
 }
@@ -353,7 +353,7 @@ func (c *Context) IMDeleteConversation(req DeleteConversationReq) error {
 
 	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/conversations/delete", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
 	if err != nil {
-		return nil
+		return err
 	}
 	return c.handlerIMError(resp)
 }
