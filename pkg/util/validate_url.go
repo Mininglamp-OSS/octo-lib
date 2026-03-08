@@ -7,6 +7,31 @@ import (
 	"strings"
 )
 
+// privateNetworks holds pre-parsed CIDR networks for private IP ranges.
+// Parsing once at init time avoids repeated parsing on every isPrivateIP call.
+var privateNetworks []*net.IPNet
+
+func init() {
+	privateRanges := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"127.0.0.0/8",
+		"169.254.0.0/16",
+		"::1/128",
+		"fc00::/7",
+		"fe80::/10",
+	}
+	for _, cidr := range privateRanges {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			// This should never happen with hardcoded valid CIDRs
+			panic(fmt.Sprintf("invalid CIDR %q: %v", cidr, err))
+		}
+		privateNetworks = append(privateNetworks, network)
+	}
+}
+
 // ValidateExternalURL validates that a URL is safe to request (prevents SSRF).
 // It rejects private/loopback IPs and non-http(s) schemes.
 func ValidateExternalURL(rawURL string) error {
@@ -50,18 +75,7 @@ func ValidateExternalURL(rawURL string) error {
 }
 
 func isPrivateIP(ip net.IP) bool {
-	privateRanges := []string{
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-		"127.0.0.0/8",
-		"169.254.0.0/16",
-		"::1/128",
-		"fc00::/7",
-		"fe80::/10",
-	}
-	for _, cidr := range privateRanges {
-		_, network, _ := net.ParseCIDR(cidr)
+	for _, network := range privateNetworks {
 		if network.Contains(ip) {
 			return true
 		}
