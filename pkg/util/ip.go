@@ -46,9 +46,14 @@ func GetClientPublicIP(r *http.Request) string {
 }
 
 // GetIPAddress 通过IP获取地址
-func GetIPAddress(ip string) (province string, city string, err error) {
+// apiKey: 高德地图 API Key，需要用户自行申请
+func GetIPAddress(ip string, apiKey string) (province string, city string, err error) {
+	if apiKey == "" {
+		err = errors.New("apiKey is required")
+		return
+	}
 	var resp *http.Response
-	resp, err = http.Get(fmt.Sprintf("https://restapi.amap.com/v3/ip?key=7e30415c3e9ce73d93d20189b9539be8&ip=%s", ip))
+	resp, err = http.Get(fmt.Sprintf("https://restapi.amap.com/v3/ip?key=%s&ip=%s", apiKey, ip))
 	if err != nil {
 		return
 	}
