@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"errors"
 )
 
 // AesEncryptSimple 加密
@@ -72,7 +73,7 @@ func AesDecryptPkcs7Base64(crypted []byte, key []byte, iv []byte) ([]byte, error
 }
 
 // AesDecrypt AesDecrypt
-func AesDecrypt(crypted, key []byte, iv []byte, unPaddingFunc func([]byte) []byte) ([]byte, error) {
+func AesDecrypt(crypted, key []byte, iv []byte, unPaddingFunc func([]byte) ([]byte, error)) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -80,8 +81,7 @@ func AesDecrypt(crypted, key []byte, iv []byte, unPaddingFunc func([]byte) []byt
 	blockMode := cipher.NewCBCDecrypter(block, iv)
 	origData := make([]byte, len(crypted))
 	blockMode.CryptBlocks(origData, crypted)
-	origData = unPaddingFunc(origData)
-	return origData, nil
+	return unPaddingFunc(origData)
 }
 
 // PKCS5Padding PKCS5Padding
@@ -92,13 +92,21 @@ func PKCS5Padding(ciphertext []byte, blockSize int) []byte {
 }
 
 // PKCS5UnPadding PKCS5UnPadding
-func PKCS5UnPadding(origData []byte) []byte {
+func PKCS5UnPadding(origData []byte) ([]byte, error) {
 	length := len(origData)
-	unpadding := int(origData[length-1])
-	if length < unpadding {
-		return []byte("unpadding error")
+	if length == 0 {
+		return nil, errors.New("empty input")
 	}
-	return origData[:(length - unpadding)]
+	unpadding := int(origData[length-1])
+	if unpadding == 0 || unpadding > length {
+		return nil, errors.New("invalid padding")
+	}
+	for i := length - unpadding; i < length; i++ {
+		if origData[i] != byte(unpadding) {
+			return nil, errors.New("invalid padding")
+		}
+	}
+	return origData[:(length - unpadding)], nil
 }
 
 // PKCS7Padding PKCS7Padding
@@ -113,11 +121,19 @@ func PKCS7Padding(ciphertext []byte, blockSize int) []byte {
 }
 
 // PKCS7UnPadding PKCS7UnPadding
-func PKCS7UnPadding(origData []byte) []byte {
+func PKCS7UnPadding(origData []byte) ([]byte, error) {
 	length := len(origData)
-
+	if length == 0 {
+		return nil, errors.New("empty input")
+	}
 	unpadding := int(origData[length-1])
-
-	return origData[:(length - unpadding)]
-
+	if unpadding == 0 || unpadding > length {
+		return nil, errors.New("invalid padding")
+	}
+	for i := length - unpadding; i < length; i++ {
+		if origData[i] != byte(unpadding) {
+			return nil, errors.New("invalid padding")
+		}
+	}
+	return origData[:(length - unpadding)], nil
 }
