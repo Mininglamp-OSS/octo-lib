@@ -26,6 +26,11 @@ func New(addr string, password string) *Conn {
 	return c
 }
 
+// Close closes the underlying Redis client and releases resources.
+func (rc *Conn) Close() error {
+	return rc.client.Close()
+}
+
 func (rc *Conn) Ping() (string, error) {
 	return rc.client.Ping().Result()
 }
