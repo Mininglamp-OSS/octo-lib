@@ -284,10 +284,10 @@ func (rc *Conn) ZAdd(key string, scoremember ...interface{}) error {
 
 	members := make([]rd.Z, 0)
 	for i := 0; i < len(scoremember); i = i + 2 {
-		score := scoremember[0].(float64)
+		score := scoremember[i].(float64)
 		members = append(members, rd.Z{
 			Score:  score,
-			Member: scoremember[1],
+			Member: scoremember[i+1],
 		})
 	}
 	return rc.client.ZAdd(key, members...).Err()
