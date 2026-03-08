@@ -25,6 +25,9 @@ type Context struct {
 	mySQLSession *dbr.Session
 	redisCache   *common.RedisCache
 	memoryCache  cache.Cache
+	mysqlOnce    sync.Once
+	redisOnce    sync.Once
+	memoryOnce   sync.Once
 	log.Log
 	EventPool      pool.Collector
 	PushPool       pool.Collector // 离线push
@@ -75,11 +78,9 @@ func (c *Context) GetConfig() *Config {
 
 // NewMySQL 创建mysql数据库实例
 func (c *Context) NewMySQL() *dbr.Session {
-
-	if c.mySQLSession == nil {
+	c.mysqlOnce.Do(func() {
 		c.mySQLSession = db.NewMySQL(c.cfg.DB.MySQLAddr, c.cfg.DB.MySQLMaxOpenConns, c.cfg.DB.MySQLMaxIdleConns, c.cfg.DB.MySQLConnMaxLifetime)
-	}
-
+	})
 	return c.mySQLSession
 }
 
@@ -100,17 +101,17 @@ func (c *Context) DB() *dbr.Session {
 
 // NewRedisCache 创建一个redis缓存
 func (c *Context) NewRedisCache() *common.RedisCache {
-	if c.redisCache == nil {
+	c.redisOnce.Do(func() {
 		c.redisCache = common.NewRedisCache(c.cfg.DB.RedisAddr, c.cfg.DB.RedisPass)
-	}
+	})
 	return c.redisCache
 }
 
 // NewMemoryCache 创建一个内存缓存
 func (c *Context) NewMemoryCache() cache.Cache {
-	if c.memoryCache == nil {
+	c.memoryOnce.Do(func() {
 		c.memoryCache = common.NewMemoryCache()
-	}
+	})
 	return c.memoryCache
 }
 
