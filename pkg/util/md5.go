@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 )
 
 //MD5 加密
@@ -19,7 +18,6 @@ func MD5(str string) string {
 
 // SHA1加密
 func SHA1(str string) string {
-	fmt.Println("str:", str)
 	h := sha1.New()
 	h.Write([]byte(str))
 	bs := h.Sum(nil)
