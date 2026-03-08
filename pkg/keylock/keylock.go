@@ -7,18 +7,18 @@ import (
 )
 
 const (
-	defaultCleanInterval = 24 * time.Hour //默认24小时清理一次
+	defaultCleanInterval = 24 * time.Hour
 )
 
-// KeyLock KeyLock
+// KeyLock provides per-key mutual exclusion.
 type KeyLock struct {
-	locks         map[string]*innerLock //关键字锁map
-	cleanInterval time.Duration         //定时清除时间间隔
-	stopChan      chan struct{}         //停止信号
-	mutex         sync.RWMutex          //全局读写锁
+	locks         map[string]*innerLock
+	cleanInterval time.Duration
+	stopChan      chan struct{}
+	mutex         sync.Mutex
 }
 
-// NewKeyLock NewKeyLock
+// NewKeyLock creates a new KeyLock.
 func NewKeyLock() *KeyLock {
 	return &KeyLock{
 		locks:         make(map[string]*innerLock),
@@ -27,62 +27,51 @@ func NewKeyLock() *KeyLock {
 	}
 }
 
-//Lock 根据关键字加锁
+// Lock acquires the lock for the given key.
 func (l *KeyLock) Lock(key string) {
-	l.mutex.RLock()
+	l.mutex.Lock()
 	keyLock, ok := l.locks[key]
-	if ok {
-		keyLock.add()
-	}
-	l.mutex.RUnlock()
 	if !ok {
-		l.mutex.Lock()
-		keyLock, ok = l.locks[key]
-		if !ok {
-			keyLock = newInnerLock()
-			l.locks[key] = keyLock
-		}
-		keyLock.add()
-		l.mutex.Unlock()
+		keyLock = newInnerLock()
+		l.locks[key] = keyLock
 	}
+	keyLock.add()
+	l.mutex.Unlock()
 	keyLock.Lock()
 }
 
-//Unlock 根据关键字解锁
+// Unlock releases the lock for the given key.
 func (l *KeyLock) Unlock(key string) {
-	l.mutex.RLock()
+	l.mutex.Lock()
 	keyLock, ok := l.locks[key]
+	l.mutex.Unlock()
 	if ok {
 		keyLock.done()
-	}
-	l.mutex.RUnlock()
-	if ok {
 		keyLock.Unlock()
 	}
 }
 
-//Clean 清理空闲锁
+// Clean removes idle locks (count == 0).
 func (l *KeyLock) Clean() {
 	l.mutex.Lock()
+	defer l.mutex.Unlock()
 	for k, v := range l.locks {
-		if v.count == 0 {
+		if atomic.LoadInt64(&v.count) == 0 {
 			delete(l.locks, k)
 		}
 	}
-	l.mutex.Unlock()
 }
 
-//StartCleanLoop 开启清理协程
+// StartCleanLoop starts a background goroutine that periodically cleans idle locks.
 func (l *KeyLock) StartCleanLoop() {
 	go l.cleanLoop()
 }
 
-//StopCleanLoop 停止清理协程
+// StopCleanLoop stops the background clean goroutine.
 func (l *KeyLock) StopCleanLoop() {
 	close(l.stopChan)
 }
 
-//清理循环
 func (l *KeyLock) cleanLoop() {
 	ticker := time.NewTicker(l.cleanInterval)
 	for {
@@ -96,13 +85,11 @@ func (l *KeyLock) cleanLoop() {
 	}
 }
 
-//内部锁信息
 type innerLock struct {
 	count int64
 	sync.Mutex
 }
 
-//新建内部锁
 func newInnerLock() *innerLock {
 	return &innerLock{}
 }
