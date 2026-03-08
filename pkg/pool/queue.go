@@ -80,18 +80,22 @@ func (e *Queue) TryPop() (v interface{}, ok bool) {
 	return
 }
 
-// 获取队列长度
+// Len returns the queue length. Safe for concurrent use.
 func (e *Queue) Len() int {
+	e.Mutex.Lock()
+	defer e.Mutex.Unlock()
 	return e.buffer.Length()
 }
 
-//Wait 等待队列消费完成
+// Wait blocks until the queue is empty or closed.
 func (e *Queue) Wait() {
 	for {
-		if e.closed || e.buffer.Length() == 0 {
+		e.Mutex.Lock()
+		done := e.closed || e.buffer.Length() == 0
+		e.Mutex.Unlock()
+		if done {
 			break
 		}
-
-		runtime.Gosched() //出让时间片
+		runtime.Gosched()
 	}
 }
