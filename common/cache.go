@@ -60,16 +60,16 @@ func NewMemoryCache() *MemoryCache {
 // Set Set
 func (m *MemoryCache) Set(key string, value string) error {
 	m.Lock()
+	defer m.Unlock()
 	m.cacheMap[key] = value
-	m.Unlock()
 	return nil
 }
 
 // SetAndExpire SetAndExpire
 func (m *MemoryCache) SetAndExpire(key string, value string, expire time.Duration) error {
 	m.Lock()
+	defer m.Unlock()
 	m.cacheMap[key] = value
-	m.Unlock()
 	return nil
 }
 
@@ -83,7 +83,7 @@ func (m *MemoryCache) Get(key string) (string, error) {
 // Delete Delete
 func (m *MemoryCache) Delete(key string) error {
 	m.Lock()
+	defer m.Unlock()
 	delete(m.cacheMap, key)
-	m.Unlock()
 	return nil
 }
