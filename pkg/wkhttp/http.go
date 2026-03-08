@@ -78,7 +78,7 @@ func (c *Context) ResponseErrorf(msg string, err error) {
 
 // ResponseErrorWithStatus ResponseErrorWithStatus
 func (c *Context) ResponseErrorWithStatus(err error, status int) {
-	c.JSON(http.StatusBadRequest, gin.H{
+	c.JSON(status, gin.H{
 		"msg":    err.Error(),
 		"status": status,
 	})
