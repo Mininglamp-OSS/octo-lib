@@ -10,7 +10,7 @@ import (
 
 // AesEncryptSimple 加密
 func AesEncryptSimple(origData []byte, key string, iv string) ([]byte, error) {
-	return AesDecryptPkcs5(origData, []byte(key), []byte(iv))
+	return AesEncryptPkcs5(origData, []byte(key), []byte(iv))
 }
 
 // AesEncryptPkcs5 加密PKCS5
