@@ -5,8 +5,10 @@ import (
 	"sort"
 )
 
-// CheckErr CheckErr
-func CheckErr(err error) {
+// MustNoErr panics if err is not nil.
+// Following Go convention, functions prefixed with Must indicate they will panic on error.
+// Use this only for truly unrecoverable errors during initialization.
+func MustNoErr(err error) {
 	if err != nil {
 		panic(err)
 	}
