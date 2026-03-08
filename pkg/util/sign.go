@@ -20,7 +20,7 @@ func GetSignStr(params map[string]interface{}) string {
 		}
 		vs := ObjToStr(v)
 
-		signStr = fmt.Sprintf("%s=%s", k, vs)
+		signStr += fmt.Sprintf("%s=%s", k, vs)
 
 		if i != len(keys)-1 {
 			signStr += "&"
