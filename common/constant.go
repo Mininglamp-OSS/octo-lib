@@ -168,7 +168,7 @@ const (
 	// 同步置顶消息
 	CMDSyncPinnedMessage = "syncPinnedMessage"
 	// 消息擦除
-	CMDMessageErase = "messageEerase"
+	CMDMessageErase = "messageErase"
 )
 
 // UserDeviceTokenPrefix 用户设备token缓存前缀
