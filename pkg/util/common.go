@@ -122,3 +122,9 @@ func MapToQueryParamSort(params map[string]interface{}) string {
 	}
 	return strs
 }
+
+// CheckErr is a deprecated alias for MustNoErr.
+// Deprecated: Use MustNoErr instead.
+func CheckErr(err error) {
+	MustNoErr(err)
+}
