@@ -635,6 +635,7 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.COS.Bucket = c.getString("cos.bucket", c.COS.Bucket)
 	c.COS.Region = c.getString("cos.region", c.COS.Region)
 	c.COS.BucketURL = c.getString("cos.bucketURL", c.COS.BucketURL)
+	c.COS.Prefix = c.getString("cos.prefix", c.COS.Prefix)
 
 	//#################### 短信服务 ####################
 	c.SMSCode = c.getString("smsCode", c.SMSCode)
@@ -1048,6 +1049,7 @@ type COSConfig struct {
 	Bucket    string // 存储桶名（如 my-bucket-12345678）
 	Region    string // 地域（如 ap-beijing）
 	BucketURL string // 访问域名（如 https://my-bucket-12345678.cos.example.com）
+	Prefix    string // 环境前缀，多环境共用 bucket 时隔离路径（如 "env-test-prefix"）
 }
 
 // UnismsConfig unisms短信
