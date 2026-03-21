@@ -636,6 +636,9 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.COS.Region = c.getString("cos.region", c.COS.Region)
 	c.COS.BucketURL = c.getString("cos.bucketURL", c.COS.BucketURL)
 	c.COS.Prefix = c.getString("cos.prefix", c.COS.Prefix)
+	// 环境变量覆盖（安全：避免密钥硬编码在配置文件中）
+	StringEnv(&c.COS.SecretID, "TS_COS_SECRET_ID")
+	StringEnv(&c.COS.SecretKey, "TS_COS_SECRET_KEY")
 
 	//#################### 短信服务 ####################
 	c.SMSCode = c.getString("smsCode", c.SMSCode)
