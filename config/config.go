@@ -126,7 +126,6 @@ type Config struct {
 	Account struct {
 		SystemUID       string //系统账号uid
 		FileHelperUID   string // 文件助手uid
-		NotificationUID string // 通知助手uid
 		SystemGroupID   string //系统群ID 需求在app_config表里设置new_user_join_system_group为1才有效
 		SystemGroupName string // 系统群的名字
 		AdminUID        string //系统管理员账号
@@ -361,7 +360,6 @@ func New() *Config {
 		Account: struct {
 			SystemUID       string
 			FileHelperUID   string
-			NotificationUID string
 			SystemGroupID   string
 			SystemGroupName string
 			AdminUID        string
@@ -370,7 +368,6 @@ func New() *Config {
 			SystemGroupID:   "g_10000",
 			SystemGroupName: "意见反馈群",
 			FileHelperUID:   "fileHelper",
-			NotificationUID: "notification",
 			AdminUID:        "admin",
 		},
 		// ---------- 文件服务 ----------
@@ -598,7 +595,6 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.Account.SystemGroupID = c.getString("account.systemGroupID", c.Account.SystemGroupID)
 	c.Account.SystemGroupName = c.getString("account.systemGroupName", c.Account.SystemGroupName)
 	c.Account.AdminUID = c.getString("account.adminUID", c.Account.AdminUID)
-	c.Account.NotificationUID = c.getString("account.notificationUID", c.Account.NotificationUID)
 
 	//#################### 文件服务 ####################
 	c.FileService = FileService(c.getString("fileService", c.FileService.String()))
