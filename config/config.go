@@ -1052,7 +1052,7 @@ type COSConfig struct {
 	Bucket    string // 存储桶名（如 my-bucket-12345678）
 	Region    string // 地域（如 ap-beijing）
 	BucketURL string // 访问域名（如 https://my-bucket-12345678.cos.example.com）
-	Prefix    string // 环境前缀，多环境共用 bucket 时隔离路径（如 "env-test-prefix"）
+	Prefix    string // 环境前缀，多环境共用 bucket 时隔离路径（如 "dev"）
 }
 
 // UnismsConfig unisms短信
