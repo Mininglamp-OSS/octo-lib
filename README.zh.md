@@ -162,8 +162,7 @@ Apache License 2.0 —— 完整文本见 [LICENSE](LICENSE)，第三方致谢�
 
 OCTO 建立在开源社区的优秀工作之上，特别感谢：
 
-- **[TangSengDaoDaoServerLib](https://github.com/TangSengDaoDao/TangSengDaoDaoServerLib)** —— 上游项目，由 TangSengDaoDao 团队开发。
-- **[WuKongIM](https://github.com/WuKongIM/WuKongIM)** —— 底层实时消息内核。
+上游归因详见 [NOTICE](NOTICE)。
 
 完整的致谢与第三方 Go 模块清单见 [NOTICE](NOTICE)。
 

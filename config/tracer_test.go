@@ -17,7 +17,7 @@ func TestTracer(t *testing.T) {
 	tracer, err := NewTracer(cfg)
 	assert.NoError(t, err)
 
-	span := tracer.StartSpan("wukongchat_root")
+	span := tracer.StartSpan("octo_root")
 	ctx := opentracing.ContextWithSpan(context.Background(), span)
 	r1 := foo3(ctx, "Hello 测试中文")
 	r2 := foo4(ctx, "Hello foo4")
