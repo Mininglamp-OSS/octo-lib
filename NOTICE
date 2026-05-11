@@ -1,0 +1,28 @@
+OCTO Lib
+Copyright 2026 MININGLAMP Technology and the OCTO contributors
+
+This product includes software developed by the following projects:
+
+* TangSengDaoDaoServerLib
+  https://github.com/TangSengDaoDao/TangSengDaoDaoServerLib
+  Copyright TangSengDaoDao contributors
+  Licensed under the Apache License, Version 2.0
+  OCTO Lib is a derivative work with significant modifications.
+
+See LICENSE for full license text.
+
+--------------------------------------------------------------------
+Third-party components requiring attribution
+--------------------------------------------------------------------
+
+The following Go modules are licensed under MPL 2.0:
+  - github.com/RichardKnop/machinery
+  - github.com/go-sql-driver/mysql
+  - github.com/hashicorp/errwrap
+  - github.com/hashicorp/go-multierror
+  - github.com/hashicorp/hcl
+  - github.com/RichardKnop/logging
+
+A full dependency license inventory is maintained in the project's
+license audit report. For commercial use, please refer to each
+upstream project's license terms.
