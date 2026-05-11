@@ -3,7 +3,7 @@ package util
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -18,7 +18,7 @@ func GetExternalIP() (string, error) {
 	}
 	defer resp.Body.Close()
 
-	resultBytes, err := ioutil.ReadAll(resp.Body)
+	resultBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -57,12 +57,13 @@ func GetIPAddress(ip string, apiKey string) (province string, city string, err e
 	if err != nil {
 		return
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		err = errors.New("查询地址失败！")
 		return
 	}
 	var data []byte
-	data, err = ioutil.ReadAll(resp.Body)
+	data, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}

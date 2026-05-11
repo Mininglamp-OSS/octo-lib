@@ -23,6 +23,9 @@ The following Go modules are licensed under MPL 2.0:
   - github.com/hashicorp/hcl
   - github.com/RichardKnop/logging
 
-A full dependency license inventory is maintained in the project's
-license audit report. For commercial use, please refer to each
-upstream project's license terms.
+The following Go modules are licensed under the MIT License:
+  - github.com/satori/go.uuid
+    Copyright (c) 2013-2018 Maxim Bublis
+  - github.com/shopspring/decimal
+
+For commercial use, please refer to each upstream project's license terms.

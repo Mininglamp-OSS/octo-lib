@@ -1,8 +1,6 @@
 package testutil
 
 import (
-	// "github.com/TangSengDaoDao/TangSengDaoDaoServer/modules/base/event"
-
 	"github.com/Mininglamp-OSS/octo-lib/config"
 	"github.com/Mininglamp-OSS/octo-lib/module"
 	"github.com/Mininglamp-OSS/octo-lib/server"
@@ -42,11 +40,6 @@ func NewTestServer(args ...string) (*server.Server, *config.Context) {
 	if err != nil {
 		panic(err)
 	}
-
-	// _, err = ctx.DB().InsertBySql("insert into `app`(app_id,app_key,status) VALUES('wukongchat',substring(MD5(RAND()),1,20),1)").Exec()
-	// if err != nil {
-	// 	panic(err)
-	// }
 
 	// 创建server
 	s := server.New(ctx)
