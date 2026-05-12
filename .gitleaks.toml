@@ -1,0 +1,8 @@
+title = "Gitleaks config for octo-lib"
+
+[allowlist]
+  description = "Test fixtures are not real credentials"
+  paths = [
+    '''_test\.go$''',
+    '''testdata/''',
+  ]
