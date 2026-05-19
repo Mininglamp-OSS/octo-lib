@@ -37,9 +37,11 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # For push events the paths-filter step is skipped; default to 'true'
-      # so downstream jobs always run on direct main pushes.
-      code: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.code }}
+      # For push events the paths-filter step is skipped; default to 'false'
+      # (code=false is not used for push — push always runs). We use a forward
+      # positive pattern list so the logic is unambiguous: code=true when at
+      # least one changed file matches a known source pattern.
+      code: ${{ github.event_name == 'pull_request' && steps.filter.outputs.code || 'true' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         if: github.event_name == 'pull_request'
@@ -49,17 +51,18 @@ jobs:
         id: filter
         if: github.event_name == 'pull_request'
         with:
-          # Negation patterns (! prefix) correctly exclude matched files even
-          # when '**' would otherwise match them — a .md file matches '**' but
-          # is then eliminated by '!**/*.md', leaving code: false for docs-only
-          # PRs. This is standard minimatch behaviour; predicate-quantifier
-          # defaults to 'any' which is exactly what we want.
+          # Positive patterns only — no negation, no predicate-quantifier needed.
+          # code=true when at least one changed file matches a source pattern.
+          # Docs-only PRs (only *.md / docs/) won't match any pattern → code=false
+          # and downstream jobs are skipped (skipped counts as passing for required
+          # status checks).
           filters: |
             code:
-              - '**'
-              - '!**/*.md'
-              - '!docs/**'
-              - '!.github/ISSUE_TEMPLATE/**'
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - '.github/workflows/**'
 
   build:
     needs: [changes]
