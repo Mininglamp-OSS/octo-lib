@@ -59,6 +59,7 @@ jobs:
           filters: |
             code:
               - '**/*.go'
+              - '**/*.proto'
               - 'go.mod'
               - 'go.sum'
               - 'Makefile'
