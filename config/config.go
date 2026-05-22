@@ -97,14 +97,17 @@ type Config struct {
 	}
 	// ---------- db相关配置 ----------
 	DB struct {
-		MySQLAddr            string        // mysql的连接信息
-		MySQLMaxOpenConns    int           // 最大连接数
-		MySQLMaxIdleConns    int           // 最大空闲连接数
-		MySQLConnMaxLifetime time.Duration // 连接最大生命周期
-		Migration            bool          // 是否合并数据库
-		RedisAddr            string        // redis地址
-		RedisPass            string        // redis密码
-		AsynctaskRedisAddr   string        // 异步任务的redis地址 不写默认为RedisAddr的地址
+		MySQLAddr                  string        // mysql的连接信息
+		MySQLMaxOpenConns          int           // 最大连接数
+		MySQLMaxIdleConns          int           // 最大空闲连接数
+		MySQLConnMaxLifetime       time.Duration // 连接最大生命周期
+		Migration                  bool          // 是否合并数据库
+		RedisAddr                  string        // redis地址
+		RedisPass                  string        // redis密码
+		RedisTLS                   bool          // 是否启用 TLS 连接 Redis（rediss://），用于 AWS ElastiCache / Azure Cache 等托管服务
+		RedisTLSInsecureSkipVerify bool          // 是否跳过 TLS 证书校验（仅用于测试 / 自签名证书场景）
+		RedisTLSCAFile             string        // 自定义 CA 证书文件路径（可选）
+		AsynctaskRedisAddr         string        // 异步任务的redis地址 不写默认为RedisAddr的地址
 	}
 	// ---------- 分布式配置 ----------
 	Cluster struct {
@@ -313,14 +316,17 @@ func New() *Config {
 
 		// ---------- db配置 ----------
 		DB: struct {
-			MySQLAddr            string
-			MySQLMaxOpenConns    int
-			MySQLMaxIdleConns    int
-			MySQLConnMaxLifetime time.Duration
-			Migration            bool
-			RedisAddr            string
-			RedisPass            string
-			AsynctaskRedisAddr   string
+			MySQLAddr                  string
+			MySQLMaxOpenConns          int
+			MySQLMaxIdleConns          int
+			MySQLConnMaxLifetime       time.Duration
+			Migration                  bool
+			RedisAddr                  string
+			RedisPass                  string
+			RedisTLS                   bool
+			RedisTLSInsecureSkipVerify bool
+			RedisTLSCAFile             string
+			AsynctaskRedisAddr         string
 		}{
 			MySQLAddr:            "root:demo@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=true",
 			MySQLMaxOpenConns:    100,
@@ -574,6 +580,9 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.DB.Migration = c.getBool("db.migration", c.DB.Migration)
 	c.DB.RedisAddr = c.getString("db.redisAddr", c.DB.RedisAddr)
 	c.DB.RedisPass = c.getString("db.redisPass", c.DB.RedisPass)
+	c.DB.RedisTLS = c.getBool("db.redisTLS", c.DB.RedisTLS)
+	c.DB.RedisTLSInsecureSkipVerify = c.getBool("db.redisTLSInsecureSkipVerify", c.DB.RedisTLSInsecureSkipVerify)
+	c.DB.RedisTLSCAFile = c.getString("db.redisTLSCAFile", c.DB.RedisTLSCAFile)
 	c.DB.AsynctaskRedisAddr = c.getString("db.asynctaskRedisAddr", c.DB.AsynctaskRedisAddr)
 
 	//#################### cluster ####################
