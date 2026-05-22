@@ -1,7 +1,11 @@
 package redis
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	"os"
 	"time"
 
 	rd "github.com/go-redis/redis"
@@ -24,6 +28,39 @@ func New(addr string, password string) *Conn {
 		Password:   password,
 	})
 	return c
+}
+
+// NewWithOptions builds a Conn using caller-supplied *rd.Options. Useful when
+// callers need to configure TLSConfig, PoolSize, custom timeouts, etc.
+// MaxRetries defaults to 3 if unset, matching the behavior of New.
+func NewWithOptions(opts *rd.Options) *Conn {
+	if opts == nil {
+		opts = &rd.Options{}
+	}
+	if opts.MaxRetries == 0 {
+		opts.MaxRetries = 3
+	}
+	return &Conn{client: rd.NewClient(opts)}
+}
+
+// BuildTLSConfig constructs a *tls.Config suitable for go-redis from caller
+// supplied flags. If caFile is empty, the system root pool is used. Returns
+// an error if the CA file cannot be read or contains no valid PEM certs.
+func BuildTLSConfig(insecureSkipVerify bool, caFile string) (*tls.Config, error) {
+	cfg := &tls.Config{InsecureSkipVerify: insecureSkipVerify}
+	if caFile == "" {
+		return cfg, nil
+	}
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("read redis CA file %q: %w", caFile, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("redis CA file %q contains no valid PEM certificates", caFile)
+	}
+	cfg.RootCAs = pool
+	return cfg, nil
 }
 
 // Close closes the underlying Redis client and releases resources.

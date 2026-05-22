@@ -1,10 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
-	"github.com/RussellLuo/timingwheel"
 	"github.com/Mininglamp-OSS/octo-lib/common"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/cache"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/db"
@@ -13,7 +13,9 @@ import (
 	"github.com/Mininglamp-OSS/octo-lib/pkg/redis"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/wkevent"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/wkhttp"
+	"github.com/RussellLuo/timingwheel"
 	"github.com/bwmarrin/snowflake"
+	rd "github.com/go-redis/redis"
 	"github.com/gocraft/dbr/v2"
 	"github.com/olivere/elastic"
 	"github.com/opentracing/opentracing-go"
@@ -102,7 +104,21 @@ func (c *Context) DB() *dbr.Session {
 // NewRedisCache 创建一个redis缓存
 func (c *Context) NewRedisCache() *common.RedisCache {
 	c.redisOnce.Do(func() {
-		c.redisCache = common.NewRedisCache(c.cfg.DB.RedisAddr, c.cfg.DB.RedisPass)
+		opts := &rd.Options{
+			Addr:     c.cfg.DB.RedisAddr,
+			Password: c.cfg.DB.RedisPass,
+		}
+		if c.cfg.DB.RedisTLS {
+			tlsCfg, err := redis.BuildTLSConfig(
+				c.cfg.DB.RedisTLSInsecureSkipVerify,
+				c.cfg.DB.RedisTLSCAFile,
+			)
+			if err != nil {
+				panic(fmt.Errorf("octo-lib: build redis TLS config: %w", err))
+			}
+			opts.TLSConfig = tlsCfg
+		}
+		c.redisCache = common.NewRedisCacheWithConn(redis.NewWithOptions(opts))
 	})
 	return c.redisCache
 }
