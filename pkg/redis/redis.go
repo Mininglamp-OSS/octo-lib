@@ -1,7 +1,11 @@
 package redis
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	"os"
 	"time"
 
 	rd "github.com/go-redis/redis"
@@ -24,6 +28,53 @@ func New(addr string, password string) *Conn {
 		Password:   password,
 	})
 	return c
+}
+
+// NewWithOptions builds a Conn using caller-supplied *rd.Options. Useful when
+// callers need to configure TLSConfig, PoolSize, custom timeouts, etc.
+// The caller's *rd.Options is not mutated — a shallow copy is taken before any
+// defaults are applied. MaxRetries==0 is treated as "unset" and replaced with
+// 3 to match the behavior of New; callers that need to disable retries should
+// use the underlying go-redis client directly.
+func NewWithOptions(opts *rd.Options) *Conn {
+	var local rd.Options
+	if opts != nil {
+		local = *opts
+	}
+	if local.MaxRetries == 0 {
+		local.MaxRetries = 3
+	}
+	return &Conn{client: rd.NewClient(&local)}
+}
+
+// Options returns the underlying go-redis client options. Intended for tests
+// and diagnostics; do not mutate the returned value.
+func (rc *Conn) Options() *rd.Options {
+	return rc.client.Options()
+}
+
+// BuildTLSConfig constructs a *tls.Config suitable for go-redis from caller
+// supplied flags. If caFile is empty, the system root pool is used. Returns
+// an error if the CA file cannot be read or contains no valid PEM certs.
+// MinVersion is pinned to TLS 1.2 to make the security posture explicit.
+func BuildTLSConfig(insecureSkipVerify bool, caFile string) (*tls.Config, error) {
+	cfg := &tls.Config{
+		InsecureSkipVerify: insecureSkipVerify,
+		MinVersion:         tls.VersionTLS12,
+	}
+	if caFile == "" {
+		return cfg, nil
+	}
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("read redis CA file %q: %w", caFile, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("redis CA file %q contains no valid PEM certificates", caFile)
+	}
+	cfg.RootCAs = pool
+	return cfg, nil
 }
 
 // Close closes the underlying Redis client and releases resources.

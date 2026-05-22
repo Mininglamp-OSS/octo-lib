@@ -19,6 +19,17 @@ func NewRedisCache(addr string, password string) *RedisCache {
 	return r
 }
 
+// NewRedisCacheWithConn wraps a caller-built *redis.Conn into a RedisCache.
+// Use this when the connection needs options beyond addr/password
+// (e.g. TLSConfig built via redis.BuildTLSConfig). Panics if conn is nil
+// to surface the misuse immediately rather than at first cache operation.
+func NewRedisCacheWithConn(conn *redis.Conn) *RedisCache {
+	if conn == nil {
+		panic("common.NewRedisCacheWithConn: nil *redis.Conn")
+	}
+	return &RedisCache{conn: conn}
+}
+
 // Set Set
 func (r *RedisCache) Set(key string, value string) error {
 	return r.conn.Set(key, value)
