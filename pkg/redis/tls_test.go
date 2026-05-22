@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -62,6 +63,9 @@ func TestBuildTLSConfig_NoCA(t *testing.T) {
 	}
 	if cfg.InsecureSkipVerify {
 		t.Errorf("expected InsecureSkipVerify=false")
+	}
+	if cfg.MinVersion != tls.VersionTLS12 {
+		t.Errorf("MinVersion = %x, want TLS 1.2 (%x)", cfg.MinVersion, tls.VersionTLS12)
 	}
 }
 
@@ -125,5 +129,17 @@ func TestNewWithOptions_NilOpts(t *testing.T) {
 	conn := NewWithOptions(nil)
 	if conn == nil || conn.client == nil {
 		t.Fatal("expected non-nil conn and client even with nil opts")
+	}
+	if got := conn.Options().MaxRetries; got != 3 {
+		t.Errorf("MaxRetries = %d, want 3 (default applied on nil opts)", got)
+	}
+}
+
+// Regression: NewWithOptions must not mutate the caller's *rd.Options.
+func TestNewWithOptions_DoesNotMutateCaller(t *testing.T) {
+	caller := &rd.Options{Addr: "127.0.0.1:1"} // MaxRetries left at zero
+	_ = NewWithOptions(caller)
+	if caller.MaxRetries != 0 {
+		t.Errorf("caller's MaxRetries was mutated to %d, want 0", caller.MaxRetries)
 	}
 }
