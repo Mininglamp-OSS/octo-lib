@@ -659,11 +659,13 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.S3.Prefix = c.getString("s3.prefix", c.S3.Prefix)
 	c.S3.UsePathStyle = c.getBool("s3.usePathStyle", c.S3.UsePathStyle)
 	// 环境变量覆盖（安全：避免长期凭据硬编码在配置文件中）
-	// 先读取项目专属变量，再让 AWS 标准变量覆盖，便于 IAM role / IRSA 等 AWS 原生工作流
-	StringEnv(&c.S3.AccessKeyID, "TS_S3_ACCESS_KEY_ID")
-	StringEnv(&c.S3.SecretAccessKey, "TS_S3_SECRET_ACCESS_KEY")
+	// 优先级遵循"越具体越优先"：YAML → AWS 通用变量 → TS_ 项目专属变量。
+	// AWS_* 提供 IRSA / IAM role 工作流的零配置兜底；TS_S3_* 表达对本应用的显式意图，
+	// 最后写入故胜出，避免宿主机上无关的 AWS 凭据静默覆盖到 R2 / B2 / MinIO 等非 AWS 部署。
 	StringEnv(&c.S3.AccessKeyID, "AWS_ACCESS_KEY_ID")
 	StringEnv(&c.S3.SecretAccessKey, "AWS_SECRET_ACCESS_KEY")
+	StringEnv(&c.S3.AccessKeyID, "TS_S3_ACCESS_KEY_ID")
+	StringEnv(&c.S3.SecretAccessKey, "TS_S3_SECRET_ACCESS_KEY")
 
 	//#################### 短信服务 ####################
 	c.SMSCode = c.getString("smsCode", c.SMSCode)

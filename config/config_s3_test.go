@@ -95,19 +95,29 @@ s3:
 			wantSecret: "aws-secret",
 		},
 		{
-			name: "AWS standard env wins over TS_ prefixed env",
+			name: "TS_ prefixed env wins over AWS standard env",
 			envs: map[string]string{
 				"TS_S3_ACCESS_KEY_ID":     "ts-id",
 				"TS_S3_SECRET_ACCESS_KEY": "ts-secret",
 				"AWS_ACCESS_KEY_ID":       "aws-id",
 				"AWS_SECRET_ACCESS_KEY":   "aws-secret",
 			},
-			wantID:     "aws-id",
-			wantSecret: "aws-secret",
+			wantID:     "ts-id",
+			wantSecret: "ts-secret",
 		},
+	}
+	credEnvs := []string{
+		"TS_S3_ACCESS_KEY_ID",
+		"TS_S3_SECRET_ACCESS_KEY",
+		"AWS_ACCESS_KEY_ID",
+		"AWS_SECRET_ACCESS_KEY",
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// 清空所有相关 env，避免宿主机/CI runner 上的真实凭据污染断言
+			for _, k := range credEnvs {
+				t.Setenv(k, "")
+			}
 			for k, v := range tt.envs {
 				t.Setenv(k, v)
 			}
