@@ -69,3 +69,61 @@ s3:
 		t.Errorf("expected S3.UsePathStyle=true")
 	}
 }
+
+func TestS3CredentialsFromEnv(t *testing.T) {
+	const yaml = `
+s3:
+  accessKeyID: from-yaml-id
+  secretAccessKey: from-yaml-secret
+`
+	tests := []struct {
+		name       string
+		envs       map[string]string
+		wantID     string
+		wantSecret string
+	}{
+		{
+			name:       "TS_ prefixed env overrides YAML",
+			envs:       map[string]string{"TS_S3_ACCESS_KEY_ID": "ts-id", "TS_S3_SECRET_ACCESS_KEY": "ts-secret"},
+			wantID:     "ts-id",
+			wantSecret: "ts-secret",
+		},
+		{
+			name:       "AWS standard env overrides YAML",
+			envs:       map[string]string{"AWS_ACCESS_KEY_ID": "aws-id", "AWS_SECRET_ACCESS_KEY": "aws-secret"},
+			wantID:     "aws-id",
+			wantSecret: "aws-secret",
+		},
+		{
+			name: "AWS standard env wins over TS_ prefixed env",
+			envs: map[string]string{
+				"TS_S3_ACCESS_KEY_ID":     "ts-id",
+				"TS_S3_SECRET_ACCESS_KEY": "ts-secret",
+				"AWS_ACCESS_KEY_ID":       "aws-id",
+				"AWS_SECRET_ACCESS_KEY":   "aws-secret",
+			},
+			wantID:     "aws-id",
+			wantSecret: "aws-secret",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.envs {
+				t.Setenv(k, v)
+			}
+			vp := viper.New()
+			vp.SetConfigType("yaml")
+			if err := vp.ReadConfig(strings.NewReader(yaml)); err != nil {
+				t.Fatalf("read config: %v", err)
+			}
+			cfg := New()
+			cfg.ConfigureWithViper(vp)
+			if cfg.S3.AccessKeyID != tt.wantID {
+				t.Errorf("S3.AccessKeyID = %q, want %q", cfg.S3.AccessKeyID, tt.wantID)
+			}
+			if cfg.S3.SecretAccessKey != tt.wantSecret {
+				t.Errorf("S3.SecretAccessKey = %q, want %q", cfg.S3.SecretAccessKey, tt.wantSecret)
+			}
+		})
+	}
+}
