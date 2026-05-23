@@ -142,6 +142,7 @@ type Config struct {
 	Seaweed     SeaweedConfig // seaweedfs配置
 	Qiniu       QiniuConfig   // 七牛云配置
 	COS         COSConfig     // 腾讯云COS配置
+	S3          S3Config      // S3 / S3兼容存储配置（AWS S3、Cloudflare R2、Backblaze B2、Wasabi 等）
 
 	// ---------- 短信运营商 ----------
 	SMSCode                string // 模拟的短信验证码
@@ -648,6 +649,15 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	// 环境变量覆盖（安全：避免密钥硬编码在配置文件中）
 	StringEnv(&c.COS.SecretID, "TS_COS_SECRET_ID")
 	StringEnv(&c.COS.SecretKey, "TS_COS_SECRET_KEY")
+	// S3 / S3兼容存储
+	c.S3.Endpoint = c.getString("s3.endpoint", c.S3.Endpoint)
+	c.S3.Region = c.getString("s3.region", c.S3.Region)
+	c.S3.Bucket = c.getString("s3.bucket", c.S3.Bucket)
+	c.S3.AccessKeyID = c.getString("s3.accessKeyID", c.S3.AccessKeyID)
+	c.S3.SecretAccessKey = c.getString("s3.secretAccessKey", c.S3.SecretAccessKey)
+	c.S3.BucketURL = c.getString("s3.bucketURL", c.S3.BucketURL)
+	c.S3.Prefix = c.getString("s3.prefix", c.S3.Prefix)
+	c.S3.UsePathStyle = c.getBool("s3.usePathStyle", c.S3.UsePathStyle)
 
 	//#################### 短信服务 ####################
 	c.SMSCode = c.getString("smsCode", c.SMSCode)
@@ -1052,6 +1062,54 @@ type QiniuConfig struct {
 	BucketName string
 	AccessKey  string
 	SecretKey  string
+}
+
+// S3Config configures any S3-compatible object storage backend.
+// Use this for AWS S3 or third-party providers that speak the S3 protocol
+// (Cloudflare R2, Backblaze B2, Wasabi, etc.). Tencent Cloud COS and MinIO
+// continue to be configured via their existing dedicated blocks for
+// backward compatibility.
+type S3Config struct {
+	// Endpoint is the S3 API hostname, without scheme.
+	// Examples:
+	//   AWS S3:        s3.us-west-2.amazonaws.com
+	//   Cloudflare R2: <accountid>.r2.cloudflarestorage.com
+	//   MinIO:         minio.example.com:9000
+	// REQUIRED — no default.
+	Endpoint string
+
+	// Region is the SigV4 signing region.
+	// Examples: us-west-2, ap-southeast-1, auto (R2).
+	// REQUIRED — must match the bucket's actual region for AWS; some
+	// providers accept any value (e.g. R2 uses "auto").
+	Region string
+
+	// Bucket is the single bucket all uploads target. Object keys carry
+	// their own logical prefix (chat/, moment/, ...), so a single bucket
+	// is the recommended deployment topology.
+	Bucket string
+
+	// AccessKeyID / SecretAccessKey are the long-lived IAM credentials
+	// for the bucket. See the security docs for the minimum IAM policy.
+	AccessKeyID     string
+	SecretAccessKey string
+
+	// BucketURL, when set, overrides the URL returned by DownloadURL and
+	// signed against by presigned GET/PUT. Use this for CDN-fronted
+	// buckets or custom domains. Must be scheme://host[:port] with no
+	// path component (same contract as MinioConfig.DownloadURL).
+	BucketURL string
+
+	// Prefix is an optional object-key prefix for multi-environment
+	// isolation (e.g. "staging/" or "prod/"). Mirrors COSConfig.Prefix.
+	Prefix string
+
+	// UsePathStyle forces path-style addressing
+	// (https://endpoint/bucket/key) instead of virtual-hosted style
+	// (https://bucket.endpoint/key). Required by some S3 gateways and
+	// by AWS for very old buckets or path-style-only endpoints; rarely
+	// needed for AWS S3 in 2026, default false.
+	UsePathStyle bool
 }
 
 // COSConfig 腾讯云COS配置
