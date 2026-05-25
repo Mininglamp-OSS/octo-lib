@@ -2,7 +2,7 @@
 name: Feature request
 about: Suggest an idea for OCTO
 title: "[feature] "
-labels: enhancement
+labels: type:feature
 assignees: ''
 ---
 
