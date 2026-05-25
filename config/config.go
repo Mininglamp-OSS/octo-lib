@@ -655,7 +655,8 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.S3.Bucket = c.getString("s3.bucket", c.S3.Bucket)
 	c.S3.AccessKeyID = c.getString("s3.accessKeyID", c.S3.AccessKeyID)
 	c.S3.SecretAccessKey = c.getString("s3.secretAccessKey", c.S3.SecretAccessKey)
-	c.S3.BucketURL = c.getString("s3.bucketURL", c.S3.BucketURL)
+	c.S3.SessionToken = c.getString("s3.sessionToken", c.S3.SessionToken)
+	c.S3.DownloadURL = c.getString("s3.downloadURL", c.S3.DownloadURL)
 	c.S3.Prefix = c.getString("s3.prefix", c.S3.Prefix)
 	c.S3.UsePathStyle = c.getBool("s3.usePathStyle", c.S3.UsePathStyle)
 	// 环境变量覆盖（安全：避免长期凭据硬编码在配置文件中）
@@ -664,8 +665,10 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	// 最后写入故胜出，避免宿主机上无关的 AWS 凭据静默覆盖到 R2 / B2 / MinIO 等非 AWS 部署。
 	StringEnv(&c.S3.AccessKeyID, "AWS_ACCESS_KEY_ID")
 	StringEnv(&c.S3.SecretAccessKey, "AWS_SECRET_ACCESS_KEY")
+	StringEnv(&c.S3.SessionToken, "AWS_SESSION_TOKEN")
 	StringEnv(&c.S3.AccessKeyID, "TS_S3_ACCESS_KEY_ID")
 	StringEnv(&c.S3.SecretAccessKey, "TS_S3_SECRET_ACCESS_KEY")
+	StringEnv(&c.S3.SessionToken, "TS_S3_SESSION_TOKEN")
 
 	//#################### 短信服务 ####################
 	c.SMSCode = c.getString("smsCode", c.SMSCode)
@@ -1102,11 +1105,34 @@ type S3Config struct {
 	AccessKeyID     string
 	SecretAccessKey string
 
-	// BucketURL, when set, overrides the URL returned by DownloadURL and
-	// signed against by presigned GET/PUT. Use this for CDN-fronted
-	// buckets or custom domains. Must be scheme://host[:port] with no
-	// path component (same contract as MinioConfig.DownloadURL).
-	BucketURL string
+	// SessionToken is the AWS STS session token for temporary credentials.
+	// Empty for long-lived IAM user keys; populated by IRSA / IMDSv2 /
+	// EKS Pod Identity / AWS SSO workflows that issue rotating credentials.
+	//
+	// Lifecycle: the service layer does NOT refresh the token itself — the
+	// deployment pipeline is responsible for refreshing AWS_SESSION_TOKEN
+	// (and the paired key/secret) before STS expiry. Leave empty for
+	// static credentials.
+	SessionToken string
+
+	// DownloadURL is the browser-facing base URL used for unsigned object
+	// access (e.g. preview redirects, upload-response `path` field). It
+	// does NOT participate in SigV4 signing — presigned PUT/GET URLs are
+	// always signed against Endpoint.
+	//
+	// Use cases:
+	//   - Empty: callers fall back to the canonical hostname constructed
+	//     from Endpoint + Bucket.
+	//   - CloudFront / CDN front-door: set to the distribution URL, e.g.
+	//     https://d123.cloudfront.net. The browser fetches reads via
+	//     CloudFront (typically with OAC for private buckets); presigned
+	//     PUT/GET still flow directly to S3.
+	//   - Custom domain: set to a bucket-subdomain custom domain, e.g.
+	//     https://my-bucket.cdn.example.com.
+	//
+	// Must be scheme://host[:port] with no path component (same contract
+	// as MinioConfig.DownloadURL).
+	DownloadURL string
 
 	// Prefix is an optional object-key prefix for multi-environment
 	// isolation (e.g. "staging/" or "prod/"). Mirrors COSConfig.Prefix.
