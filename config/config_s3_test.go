@@ -72,6 +72,27 @@ s3:
 	}
 }
 
+// TestS3LegacyBucketURLNotRead locks in the clean break from issue #42:
+// the deprecated `s3.bucketURL` viper key must not populate the renamed
+// `DownloadURL` field. If a future change reintroduces a fallback alias,
+// this test will fail and force an explicit decision.
+func TestS3LegacyBucketURLNotRead(t *testing.T) {
+	const yaml = `
+s3:
+  bucketURL: https://legacy.example.com
+`
+	vp := viper.New()
+	vp.SetConfigType("yaml")
+	if err := vp.ReadConfig(strings.NewReader(yaml)); err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	cfg := New()
+	cfg.ConfigureWithViper(vp)
+	if cfg.S3.DownloadURL != "" {
+		t.Errorf("legacy s3.bucketURL must not populate DownloadURL; got %q", cfg.S3.DownloadURL)
+	}
+}
+
 func TestS3CredentialsFromEnv(t *testing.T) {
 	const yaml = `
 s3:
@@ -86,6 +107,13 @@ s3:
 		wantSec   string
 		wantToken string
 	}{
+		{
+			name:      "no env vars — YAML wins",
+			envs:      nil,
+			wantID:    "from-yaml-id",
+			wantSec:   "from-yaml-secret",
+			wantToken: "from-yaml-token",
+		},
 		{
 			name: "TS_ prefixed env overrides YAML",
 			envs: map[string]string{

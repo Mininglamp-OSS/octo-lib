@@ -1113,6 +1113,10 @@ type S3Config struct {
 	// deployment pipeline is responsible for refreshing AWS_SESSION_TOKEN
 	// (and the paired key/secret) before STS expiry. Leave empty for
 	// static credentials.
+	//
+	// Override precedence: YAML s3.sessionToken → AWS_SESSION_TOKEN →
+	// TS_S3_SESSION_TOKEN (project-prefixed wins). Same pattern as the
+	// AccessKeyID / SecretAccessKey pair.
 	SessionToken string
 
 	// DownloadURL is the browser-facing base URL used for unsigned object
