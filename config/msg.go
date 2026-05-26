@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 
@@ -155,6 +156,9 @@ func (c *Context) SendMessageWithResult(req *MsgSendReq) (*MsgSendResp, error) {
 		messageID := dataResult.Get("message_id").Int()
 		messageSeq := dataResult.Get("message_seq").Int()
 		clientMsgNo := dataResult.Get("client_msg_no").String()
+		if messageSeq < 0 || messageSeq > math.MaxUint32 {
+			return nil, fmt.Errorf("IM服务[SendMessage]返回 message_seq=%d 超出 uint32 范围", messageSeq)
+		}
 		return &MsgSendResp{
 			MessageID:   messageID,
 			MessageSeq:  uint32(messageSeq),

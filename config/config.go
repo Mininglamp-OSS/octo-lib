@@ -878,19 +878,31 @@ func (c *Config) GetAvatarPath(uid string) string {
 
 // GetGroupAvatarFilePath 获取群头像上传路径
 func (c *Config) GetGroupAvatarFilePath(groupNo string) string {
-	avatarID := crc32.ChecksumIEEE([]byte(groupNo)) % uint32(c.Avatar.Partition)
+	partition := c.Avatar.Partition
+	if partition <= 0 {
+		partition = 1
+	}
+	avatarID := crc32.ChecksumIEEE([]byte(groupNo)) % uint32(partition)
 	return fmt.Sprintf("group/%d/%s.png", avatarID, groupNo)
 }
 
 // GetCommunityAvatarFilePath 获取社区头像上传路径
 func (c *Config) GetCommunityAvatarFilePath(communityNo string) string {
-	avatarID := crc32.ChecksumIEEE([]byte(communityNo)) % uint32(c.Avatar.Partition)
+	partition := c.Avatar.Partition
+	if partition <= 0 {
+		partition = 1
+	}
+	avatarID := crc32.ChecksumIEEE([]byte(communityNo)) % uint32(partition)
 	return fmt.Sprintf("community/%d/%s.png", avatarID, communityNo)
 }
 
 // GetCommunityCoverFilePath 获取社区封面上传路径
 func (c *Config) GetCommunityCoverFilePath(communityNo string) string {
-	avatarID := crc32.ChecksumIEEE([]byte(communityNo)) % uint32(c.Avatar.Partition)
+	partition := c.Avatar.Partition
+	if partition <= 0 {
+		partition = 1
+	}
+	avatarID := crc32.ChecksumIEEE([]byte(communityNo)) % uint32(partition)
 	return fmt.Sprintf("community/%d/%s_cover.png", avatarID, communityNo)
 }
 
@@ -975,7 +987,7 @@ func GetEnvInt(key string, defaultValue int) int {
 	if strings.TrimSpace(v) == "" {
 		return defaultValue
 	}
-	i, err := strconv.ParseInt(v, 10, 64)
+	i, err := strconv.ParseInt(v, 10, 0)
 	if err != nil {
 		fmt.Printf("WARN: invalid env %s=%q, using default %d: %v\n", key, v, defaultValue, err)
 		return defaultValue
