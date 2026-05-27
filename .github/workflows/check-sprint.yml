@@ -20,5 +20,6 @@ jobs:
     with:
       pr-number: ${{ github.event.pull_request.number }}
       repo-name: ${{ github.repository }}
+      enforce-freshness: true
     secrets:
       PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
