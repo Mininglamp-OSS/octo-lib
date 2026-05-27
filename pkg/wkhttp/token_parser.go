@@ -67,6 +67,9 @@ var (
 // Parse 实现 TokenParser；ctx 当前未使用（cache.Cache 不接受 context），
 // 保留参数是为了未来升级 cache 接口时不破坏 TokenParser 签名。
 func (p legacyTokenParser) Parse(_ context.Context, token string) (UserInfo, error) {
+	// 空 token 分支在通过 AuthMiddleware 调用时不可达——middleware 在调 parser 前
+	// 已经显式 short-circuit。保留此分支是为了 defense-in-depth：直接复用
+	// legacyTokenParser 的下游代码（测试夹具 / 自定义中间件）仍能拿到正确 sentinel。
 	if strings.TrimSpace(token) == "" {
 		return UserInfo{}, ErrTokenMissing
 	}

@@ -40,6 +40,31 @@ func cleanRateLimitKeys(t *testing.T, c *rd.Client) {
 	}
 }
 
+// TestNewKeyedLimiterRejectsInvalidConfig 验证启动期校验：rps<=0 或 burst<=0
+// 触发 panic（loud-fast），防止配置错误悄悄变成 100% 429（Lua fail-closed 早返回）。
+func TestNewKeyedLimiterRejectsInvalidConfig(t *testing.T) {
+	cases := []struct {
+		name  string
+		rps   float64
+		burst int
+	}{
+		{"zero rps", 0, 10},
+		{"negative rps", -1.5, 10},
+		{"zero burst", 1.0, 0},
+		{"negative burst", 1.0, -3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatalf("expected panic for rps=%v burst=%d, got none", tc.rps, tc.burst)
+				}
+			}()
+			newKeyedLimiter(nil, "ratelimit:test:", tc.rps, tc.burst)
+		})
+	}
+}
+
 // TestRateLimitErrorSpec 验证三个限流中间件共用的 ErrorSpec 形状：
 // Code 是 i18n key，retry_after 通过 Details 透传给 renderer。
 func TestRateLimitErrorSpec(t *testing.T) {

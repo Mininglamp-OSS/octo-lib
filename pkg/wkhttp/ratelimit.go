@@ -105,6 +105,16 @@ func (k *keyedLimiter) logDegrade(msg string, fields ...zap.Field) {
 }
 
 func newKeyedLimiter(client *rd.Client, keyPrefix string, rps float64, burst int) *keyedLimiter {
+	// 启动期校验：rps<=0 / burst<=0 会让 Lua 脚本走 fail-closed 早返回（deny + retry_after=1s），
+	// 整个路由变成 100% 429。这种配置错误（env-var rename / config drift / 默认值打错）
+	// 在生产里属于"不该出现"，因此在构造时大声 panic 而不是默默工作；middleware 在服务
+	// 启动时一次性创建，panic 会立即阻断启动，比线上 429 雪崩好排查。
+	if rps <= 0 {
+		panic("wkhttp.newKeyedLimiter: rps must be > 0 (got " + strconv.FormatFloat(rps, 'f', -1, 64) + ")")
+	}
+	if burst <= 0 {
+		panic("wkhttp.newKeyedLimiter: burst must be > 0 (got " + strconv.Itoa(burst) + ")")
+	}
 	return &keyedLimiter{
 		client:    client,
 		script:    rd.NewScript(tokenBucketScript),
