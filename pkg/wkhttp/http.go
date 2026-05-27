@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/Mininglamp-OSS/octo-lib/pkg/cache"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/log"
@@ -28,6 +28,14 @@ const (
 type WKHttp struct {
 	r    *gin.Engine
 	pool sync.Pool
+
+	// errorRenderer 存 *errorRendererBox（包装 ErrorRenderer 接口）。
+	// 用 atomic.Pointer 而非 atomic.Value 的原因：atomic.Value 要求每次 Store 的
+	// 动态类型一致，注入不同具体类型的 renderer 会 panic；测试与多模块场景
+	// 下都需要支持任意实现切换，因此与 TokenParser 一致采用 boxed atomic.Pointer。
+	errorRenderer atomic.Pointer[errorRendererBox]
+	// tokenParser 存 *tokenParserBox（包装 TokenParser 接口）。同上。
+	tokenParser atomic.Pointer[tokenParserBox]
 }
 
 // New New
@@ -43,6 +51,16 @@ func New() *WKHttp {
 	return l
 }
 
+// SetErrorRenderer 注入自定义 ErrorRenderer。线程安全，可在服务启动后任意时刻调用。
+// 传 nil 表示恢复 default fallback。
+func (l *WKHttp) SetErrorRenderer(r ErrorRenderer) {
+	if r == nil {
+		l.errorRenderer.Store(nil)
+		return
+	}
+	l.errorRenderer.Store(&errorRendererBox{r: r})
+}
+
 func allocateContext() *Context {
 	return &Context{Context: nil, lg: log.NewTLog("context")}
 }
@@ -51,10 +69,14 @@ func allocateContext() *Context {
 type Context struct {
 	*gin.Context
 	lg log.Log
+	// wk 反向引用所属 WKHttp，使 c.RenderError 能找到注入的 ErrorRenderer。
+	// 由 WKHttpHandler 在每次请求 Get/Put 时设置/清理。
+	wk *WKHttp
 }
 
 func (c *Context) reset() {
 	c.Context = nil
+	c.wk = nil
 }
 
 // ResponseError ResponseError
@@ -187,11 +209,10 @@ func (l *WKHttp) WKHttpHandler(handlerFunc HandlerFunc) gin.HandlerFunc {
 		hc := l.pool.Get().(*Context)
 		hc.reset()
 		hc.Context = c
+		hc.wk = l
 		defer l.pool.Put(hc)
 
 		handlerFunc(hc)
-
-		//handlerFunc(&Context{Context: c})
 	}
 }
 
@@ -265,36 +286,92 @@ func (l *WKHttp) handlersToGinHandleFuncs(handlers []HandlerFunc) []gin.HandlerF
 }
 
 // AuthMiddleware 认证中间件
+//
+// 三处历史硬编码中文错误改为 c.RenderError：
+//   - token 缺失 → err.shared.auth.token_missing
+//   - cache 查不到/为空 → err.shared.auth.required
+//   - 解析格式错误 → err.shared.auth.token_invalid
+//
+// 未注入 ErrorRenderer 时由 default fallback 输出 DefaultMessage（与历史完全一致）。
+//
+// 解析成功后同时执行：
+//   - c.Set("uid"/"name"/"role", ...)（向后兼容旧业务代码）
+//   - WithUser(c.Request.Context(), info) 写入 context（D20，便于 service 层透传）
+//
+// 若服务注入了 TokenParser，则用注入的 parser 解析；否则走 legacyTokenParser
+// （cache 查 "{prefix}{token}" → "uid@name[@role]" split）。
 func (l *WKHttp) AuthMiddleware(cache cache.Cache, tokenPrefix string) HandlerFunc {
+	legacy := legacyTokenParser{cache: cache, tokenPrefix: tokenPrefix}
 
 	return func(c *Context) {
 		token := c.GetHeader("token")
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"msg": "token不能为空，请先登录！",
+			c.RenderError(ErrorSpec{
+				Code:            "err.shared.auth.token_missing",
+				DefaultMessage:  "token不能为空，请先登录！",
+				TransportStatus: http.StatusUnauthorized,
+				SemanticStatus:  http.StatusUnauthorized,
 			})
+			c.Abort()
 			return
 		}
-		uidAndName := GetLoginUID(token, tokenPrefix, cache)
-		if strings.TrimSpace(uidAndName) == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"msg": "请先登录！",
-			})
+
+		parser := l.getTokenParser()
+		if parser == nil {
+			parser = legacy
+		}
+		info, err := parser.Parse(c.Request.Context(), token)
+		if err != nil {
+			spec := authErrorSpec(err)
+			c.RenderError(spec)
+			c.Abort()
 			return
 		}
-		uidAndNames := strings.Split(uidAndName, "@")
-		if len(uidAndNames) < 2 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"msg": "token有误！",
-			})
-			return
+
+		c.Set("uid", info.UID)
+		c.Set("name", info.Name)
+		if info.Role != "" {
+			c.Set("role", info.Role)
 		}
-		c.Set("uid", uidAndNames[0])
-		c.Set("name", uidAndNames[1])
-		if len(uidAndNames) > 2 {
-			c.Set("role", uidAndNames[2])
-		}
+		c.Request = c.Request.WithContext(WithUser(c.Request.Context(), info))
 		c.Next()
+	}
+}
+
+// authErrorSpec 把 TokenParser 返回的 error 映射到 ErrorSpec。
+// 优先用 errors.Is 区分 legacy 三态（missing / invalid / required-fallback）；
+// 自定义 parser 若不复用 sentinel，统一回退到 err.shared.auth.required。
+func authErrorSpec(err error) ErrorSpec {
+	switch {
+	case errors.Is(err, ErrTokenMissing):
+		return ErrorSpec{
+			Code:            "err.shared.auth.token_missing",
+			DefaultMessage:  "token不能为空，请先登录！",
+			TransportStatus: http.StatusUnauthorized,
+			SemanticStatus:  http.StatusUnauthorized,
+		}
+	case errors.Is(err, ErrTokenInvalid):
+		return ErrorSpec{
+			Code:            "err.shared.auth.token_invalid",
+			DefaultMessage:  "token有误！",
+			TransportStatus: http.StatusUnauthorized,
+			SemanticStatus:  http.StatusUnauthorized,
+		}
+	case errors.Is(err, ErrTokenNotFound):
+		return ErrorSpec{
+			Code:            "err.shared.auth.required",
+			DefaultMessage:  "请先登录！",
+			TransportStatus: http.StatusUnauthorized,
+			SemanticStatus:  http.StatusUnauthorized,
+		}
+	default:
+		// 自定义 parser 未使用 sentinel：默认按"未登录"处理，避免泄露内部错误细节。
+		return ErrorSpec{
+			Code:            "err.shared.auth.required",
+			DefaultMessage:  "请先登录！",
+			TransportStatus: http.StatusUnauthorized,
+			SemanticStatus:  http.StatusUnauthorized,
+		}
 	}
 }
 
@@ -338,12 +415,22 @@ func (r *RouterGroup) PUT(relativePath string, handlers ...HandlerFunc) {
 }
 
 // CORSMiddleware 跨域
+//
+// AllowHeaders 在历史 header 列表基础上增补 i18n 协议三个头：
+//   - X-Octo-Error-Envelope: 客户端声明可解析的错误 envelope 版本
+//   - X-Octo-Lang: 客户端显式覆盖语言（优先级高于 Accept-Language）
+//   - Accept-Language: 标准协商语言头
+//
+// ExposeHeaders 是新增字段（历史 CORSMiddleware 完全没有这一行）：
+//   - Content-Language: 实际返回的响应语言，浏览器可读
+//   - Vary: 让代理 / 浏览器按语言变体缓存
 func CORSMiddleware() HandlerFunc {
 
 	return func(c *Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, token, accept, origin, Cache-Control, X-Requested-With, appid, noncestr, sign, timestamp")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, token, accept, origin, Cache-Control, X-Requested-With, appid, noncestr, sign, timestamp, X-Octo-Error-Envelope, X-Octo-Lang, Accept-Language")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Language, Vary")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT,DELETE,PATCH")
 
 		if c.Request.Method == "OPTIONS" {
