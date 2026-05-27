@@ -177,6 +177,12 @@ func setRateLimitHeaders(h http.Header, scope string, burst, remaining int, allo
 // getClientIP 从请求头按优先级取客户端 IP。
 // 生产架构为腾讯云 CLB 直连 Pod（pass-to-target），单层代理，XFF 只含客户端真实 IP。
 // 若未来新增 CDN 或多层反代，需重新评估 rightmost XFF 的取值是否正确。
+//
+// ⚠️ 信任假设（部署方必须保证）：本函数直接信任 X-Real-Ip / X-Forwarded-For。
+// 仅当上游存在受信反代（CLB / Nginx / Envoy 等）会**剥离客户端伪造的同名头**
+// 并写入真实客户端 IP 时，per-IP 限流才有效。若服务对外暴露时绕过反代直连，
+// 客户端可任意伪造这两个头绕过限流——部署方需在反代/网络策略层面阻断。
+// 复用本中间件的新服务务必校验该前提。
 func getClientIP(r *http.Request) string {
 	if ip := strings.TrimSpace(r.Header.Get("X-Real-Ip")); ip != "" {
 		return ip

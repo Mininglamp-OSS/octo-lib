@@ -113,7 +113,13 @@ func splitScheme(s string) (scheme, host string) {
 //
 // 注意：预检（OPTIONS）通常被上游中间件提前 Abort，不会进入本中间件。
 // 当上游发出的是规范不合法的组合（如 "*" + credentials=true），浏览器本身
-// 会拒绝跨域 credentialed 预检，因此攻击路径依然被封堵。
+// 会拒绝跨域 credentialed 预检，因此攻击路径依然被封堵。预检顺序的彻底
+// 修复需要把 CORSMiddleware 与本中间件合并为白名单感知的单一中间件，
+// 见 follow-up issue。
+//
+// 返回类型为 gin.HandlerFunc（而非 wkhttp.HandlerFunc）：本中间件只操作
+// 响应头，不需要 c.RenderError 等 *Context 能力，且必须能与上游纯 gin 中间件
+// （来自 dmwork-lib 的 server.New 等）混排注册，因此直接使用 gin 原生签名。
 func SecureCORSOverrideMiddleware(allowed []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get(headerOrigin)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	rd "github.com/go-redis/redis"
@@ -113,16 +114,7 @@ func TestRateLimitMiddlewareDefaultFallback(t *testing.T) {
 	if w2.Code != http.StatusTooManyRequests {
 		t.Fatalf("status=%d body=%s", w2.Code, w2.Body.String())
 	}
-	if !contains(w2.Body.String(), "请求过于频繁") {
+	if !strings.Contains(w2.Body.String(), "请求过于频繁") {
 		t.Errorf("body=%q, want legacy zh message", w2.Body.String())
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

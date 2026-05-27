@@ -19,7 +19,7 @@ type TokenParser interface {
 // 同一 *WKHttp 实例最后一次注入生效；nil 表示恢复 legacy 解析。
 func (l *WKHttp) SetTokenParser(p TokenParser) {
 	if p == nil {
-		l.tokenParser.Store((*tokenParserBox)(nil))
+		l.tokenParser.Store(nil)
 		return
 	}
 	l.tokenParser.Store(&tokenParserBox{p: p})
