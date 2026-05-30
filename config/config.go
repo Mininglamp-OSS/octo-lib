@@ -876,10 +876,25 @@ func (c *Config) GetAvatarPath(uid string) string {
 	return fmt.Sprintf("users/%s/avatar", uid)
 }
 
-// GetGroupAvatarFilePath 获取群头像上传路径
+// GetGroupAvatarFilePath returns the object path for a group's avatar image.
+//
+// The path is routed under the "avatar" bucket so it lands in the publicly
+// readable bucket used by all avatars (user, group, community). Before this
+// fix (GH#21 / octo-server#103) the path started with "group/", which
+// routed the file into the private "group" bucket (intended for group
+// exports, not publicly served images). The MinIO / OSS splitBucketAndObject
+// helper in octo-server selects the destination bucket from the first path
+// segment when it appears in the allow-list, so "avatar/..." → avatar
+// bucket (anonymous-readable) and "group/..." → group bucket (private).
+//
+// Deployments upgrading from a version that stored group avatars under the
+// old "group/" path should either:
+//   - re-generate group avatars (trigger a group-member change), or
+//   - copy the existing objects from the "group" bucket to "avatar" bucket
+//     under the new key layout.
 func (c *Config) GetGroupAvatarFilePath(groupNo string) string {
 	avatarID := crc32.ChecksumIEEE([]byte(groupNo)) % uint32(c.Avatar.Partition)
-	return fmt.Sprintf("group/%d/%s.png", avatarID, groupNo)
+	return fmt.Sprintf("avatar/group/%d/%s.png", avatarID, groupNo)
 }
 
 // GetCommunityAvatarFilePath 获取社区头像上传路径
