@@ -234,9 +234,11 @@ func ValidateRichTextPayload(data []byte) (*RichTextPayload, error) {
 	return &p, nil
 }
 
-// isAllowedImageURLScheme 判断 image url 的 scheme 是否在 allowlist（仅 http/https）。
-// 取代旧的「仅挡 data:」策略：scheme allowlist 同时拦下 data:/javascript:/vbscript:/
-// file: 等一切非 http(s) scheme（契约 §1.4 + §3）。无 scheme 的相对地址也拒绝。
+// isAllowedImageURLScheme 判断 image url 是否为可用的 http(s) 绝对地址：
+// scheme 必须在 allowlist（仅 http/https）且 host 非空。取代旧的「仅挡 data:」
+// 策略：scheme allowlist 同时拦下 data:/javascript:/vbscript:/file: 等一切非
+// http(s) scheme（契约 §1.4 + §3）；host 检查再挡掉 http:// 无 host 的畸形地址
+// 与无 scheme 的相对地址。
 func isAllowedImageURLScheme(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -244,7 +246,7 @@ func isAllowedImageURLScheme(raw string) bool {
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":
-		return true
+		return u.Host != ""
 	default:
 		return false
 	}

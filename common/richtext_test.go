@@ -152,6 +152,8 @@ func TestValidateRichTextBlocks_ImageSchemeAllowlist(t *testing.T) {
 		"ftp://x/a.png",
 		"/relative/a.png", // 无 scheme
 		"x/a.png",         // 无 scheme
+		"http://",         // scheme 对但无 host
+		"https://",        // scheme 对但无 host
 	}
 	for _, u := range bad {
 		blk := RichTextBlock{Type: RichTextBlockImage, URL: u, Width: 1, Height: 1}
