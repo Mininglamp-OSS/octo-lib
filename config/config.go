@@ -876,21 +876,44 @@ func (c *Config) GetAvatarPath(uid string) string {
 	return fmt.Sprintf("users/%s/avatar", uid)
 }
 
-// GetGroupAvatarFilePath 获取群头像上传路径
-func (c *Config) GetGroupAvatarFilePath(groupNo string) string {
+// avatarVersion 从变参中取头像版本号。
+// 缺省或非正值表示使用旧版(无版本)路径,从而保持向后兼容。
+func avatarVersion(version []int64) int64 {
+	if len(version) > 0 {
+		return version[0]
+	}
+	return 0
+}
+
+// GetGroupAvatarFilePath 获取群头像上传路径。
+// 不传 version 或 version <= 0 时返回旧版稳定路径;version > 0 时返回带版本的路径,
+// 使对象键随每次上传变化,以规避忽略 query string 的 CDN 缓存。
+func (c *Config) GetGroupAvatarFilePath(groupNo string, version ...int64) string {
 	avatarID := crc32.ChecksumIEEE([]byte(groupNo)) % uint32(c.Avatar.Partition)
+	if v := avatarVersion(version); v > 0 {
+		return fmt.Sprintf("group/%d/%s/%d.png", avatarID, groupNo, v)
+	}
 	return fmt.Sprintf("group/%d/%s.png", avatarID, groupNo)
 }
 
-// GetCommunityAvatarFilePath 获取社区头像上传路径
-func (c *Config) GetCommunityAvatarFilePath(communityNo string) string {
+// GetCommunityAvatarFilePath 获取社区头像上传路径。
+// 不传 version 或 version <= 0 时返回旧版稳定路径;version > 0 时返回带版本的路径。
+func (c *Config) GetCommunityAvatarFilePath(communityNo string, version ...int64) string {
 	avatarID := crc32.ChecksumIEEE([]byte(communityNo)) % uint32(c.Avatar.Partition)
+	if v := avatarVersion(version); v > 0 {
+		return fmt.Sprintf("community/%d/%s/%d.png", avatarID, communityNo, v)
+	}
 	return fmt.Sprintf("community/%d/%s.png", avatarID, communityNo)
 }
 
-// GetCommunityCoverFilePath 获取社区封面上传路径
-func (c *Config) GetCommunityCoverFilePath(communityNo string) string {
+// GetCommunityCoverFilePath 获取社区封面上传路径。
+// 不传 version 或 version <= 0 时返回旧版稳定路径;version > 0 时返回带版本的路径,
+// 版本路径形态避免与旧版 community/<partition>/<community_no>_cover.png 冲突。
+func (c *Config) GetCommunityCoverFilePath(communityNo string, version ...int64) string {
 	avatarID := crc32.ChecksumIEEE([]byte(communityNo)) % uint32(c.Avatar.Partition)
+	if v := avatarVersion(version); v > 0 {
+		return fmt.Sprintf("community/%d/%s/cover/%d.png", avatarID, communityNo, v)
+	}
 	return fmt.Sprintf("community/%d/%s_cover.png", avatarID, communityNo)
 }
 
