@@ -15,7 +15,11 @@ on:
   pull_request:
     branches: [main]
 
-permissions: {}
+# Caller permissions act as an upper bound for the reusable workflow.
+# The reusable workflow needs `contents: read` to run `actions/checkout`,
+# so we must grant it here too (a top-level `{}` would block startup).
+permissions:
+  contents: read
 
 jobs:
   history:
