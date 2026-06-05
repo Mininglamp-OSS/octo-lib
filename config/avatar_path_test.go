@@ -111,3 +111,30 @@ func TestAvatarVersionedPathDiffersFromLegacy(t *testing.T) {
 		})
 	}
 }
+
+// TestAvatarDistinctVersionsProduceDistinctPaths 锁定「每个版本号产生唯一对象键」契约,
+// 这是缓存失效生效的前提:版本变化时对象键必须变化。
+func TestAvatarDistinctVersionsProduceDistinctPaths(t *testing.T) {
+	cfg := newAvatarTestConfig()
+
+	if v1, v2 := cfg.GetGroupAvatarFilePath("G123", 1), cfg.GetGroupAvatarFilePath("G123", 2); v1 == v2 {
+		t.Errorf("distinct versions should produce distinct paths, both = %q", v1)
+	}
+	if v1, v2 := cfg.GetCommunityAvatarFilePath("C456", 1), cfg.GetCommunityAvatarFilePath("C456", 2); v1 == v2 {
+		t.Errorf("distinct versions should produce distinct paths, both = %q", v1)
+	}
+	if v1, v2 := cfg.GetCommunityCoverFilePath("C789", 1), cfg.GetCommunityCoverFilePath("C789", 2); v1 == v2 {
+		t.Errorf("distinct versions should produce distinct paths, both = %q", v1)
+	}
+}
+
+// TestAvatarVersionFirstWins 验证变参的「仅取第一个参数」语义:多传的版本号被忽略。
+func TestAvatarVersionFirstWins(t *testing.T) {
+	cfg := newAvatarTestConfig()
+
+	got := cfg.GetGroupAvatarFilePath("G123", 7, 99, 100)
+	want := "group/60/G123/7.png"
+	if got != want {
+		t.Errorf("GetGroupAvatarFilePath first-wins: got %q, want %q", got, want)
+	}
+}

@@ -877,7 +877,8 @@ func (c *Config) GetAvatarPath(uid string) string {
 }
 
 // avatarVersion 从变参中取头像版本号。
-// 缺省或非正值表示使用旧版(无版本)路径,从而保持向后兼容。
+// 仅取第一个参数(first-wins),其余忽略;缺省或非正值表示使用旧版(无版本)路径,
+// 从而保持向后兼容。
 func avatarVersion(version []int64) int64 {
 	if len(version) > 0 {
 		return version[0]
