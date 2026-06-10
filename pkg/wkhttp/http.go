@@ -80,6 +80,9 @@ func (c *Context) reset() {
 }
 
 // ResponseError ResponseError
+//
+// Legacy shape {"msg","status"}. New endpoints should respond errors via
+// RenderError / the injected ErrorRenderer (envelope.Error wire shape, R1).
 func (c *Context) ResponseError(err error) {
 	c.JSON(http.StatusBadRequest, gin.H{
 		"msg":    err.Error(),
@@ -120,6 +123,9 @@ func (c *Context) GetPage() (pageIndex int64, pageSize int64) {
 }
 
 // ResponseOK 返回成功
+//
+// Legacy shape {"status":200}. New endpoints should prefer ResponseEmpty
+// ({"data":{}}, R1); existing clients depend on this shape, do not change it.
 func (c *Context) ResponseOK() {
 	c.JSON(http.StatusOK, gin.H{
 		"status": http.StatusOK,
@@ -127,6 +133,9 @@ func (c *Context) ResponseOK() {
 }
 
 // Response Response
+//
+// Emits data bare (no envelope). New endpoints should prefer ResponseData /
+// ResponseCursor / ResponseOffset (R1 envelope wire shapes).
 func (c *Context) Response(data interface{}) {
 	c.JSON(http.StatusOK, data)
 }
