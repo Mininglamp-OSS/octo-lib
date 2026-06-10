@@ -52,23 +52,38 @@ func TestResponseEmpty(t *testing.T) {
 
 func TestResponseCursor(t *testing.T) {
 	ctx, w := newTestContext(t, "")
-	ctx.ResponseCursor([]testItem{{ID: "a"}, {ID: "b"}}, true, "tok")
+	ResponseCursor(ctx, []testItem{{ID: "a"}, {ID: "b"}}, true, "tok")
 	assertResponse(t, w, http.StatusOK,
 		`{"data":[{"id":"a"},{"id":"b"}],"pagination":{"has_more":true,"next_cursor":"tok"}}`)
 }
 
 func TestResponseCursorLastPage(t *testing.T) {
 	ctx, w := newTestContext(t, "")
-	ctx.ResponseCursor([]testItem{}, false, "")
+	ResponseCursor(ctx, []testItem{}, false, "")
 	// has_more stays explicit; next_cursor omitted; empty slice → "data":[]
+	assertResponse(t, w, http.StatusOK, `{"data":[],"pagination":{"has_more":false}}`)
+}
+
+func TestResponseCursorNilSliceNormalized(t *testing.T) {
+	ctx, w := newTestContext(t, "")
+	// nil is the default Go slice state (var s []T + no appends) — the
+	// helper must emit "data":[] rather than "data":null (R1).
+	ResponseCursor[testItem](ctx, nil, false, "")
 	assertResponse(t, w, http.StatusOK, `{"data":[],"pagination":{"has_more":false}}`)
 }
 
 func TestResponseOffset(t *testing.T) {
 	ctx, w := newTestContext(t, "")
-	ctx.ResponseOffset([]testItem{{ID: "a"}}, 42, 2, 20)
+	ResponseOffset(ctx, []testItem{{ID: "a"}}, 42, 2, 20)
 	assertResponse(t, w, http.StatusOK,
 		`{"data":[{"id":"a"}],"pagination":{"total":42,"page":2,"page_size":20}}`)
+}
+
+func TestResponseOffsetNilSliceNormalized(t *testing.T) {
+	ctx, w := newTestContext(t, "")
+	ResponseOffset[testItem](ctx, nil, 0, 1, 20)
+	assertResponse(t, w, http.StatusOK,
+		`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`)
 }
 
 func TestGetCursorParams(t *testing.T) {

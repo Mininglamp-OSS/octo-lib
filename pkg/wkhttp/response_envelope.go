@@ -12,9 +12,11 @@ import (
 // these instead of the legacy Response / ResponseOK helpers; error
 // responses keep going through RenderError / the injected ErrorRenderer.
 //
-// Go methods cannot take type parameters, so the helpers accept `any`;
-// the emitted JSON is identical to the corresponding envelope generic
-// (swag annotations should reference envelope.Data[T] etc. for schemas).
+// Single-object helpers are Context methods taking `any`; list helpers
+// are package-level generic functions (methods cannot take type
+// parameters) so the slice type is compiler-checked and nil slices are
+// normalized to []. Swag annotations reference envelope.Data[T] /
+// envelope.CursorList[T] / envelope.OffsetList[T] for schemas.
 
 // R5 pagination parameter bounds.
 const (
@@ -46,14 +48,17 @@ func (c *Context) ResponseEmpty() {
 
 // ResponseCursor replies 200 with the cursor-paginated list envelope:
 // { "data": items, "pagination": {has_more, next_cursor} } (R1 + R5).
-// items must be a slice; pass an empty (non-nil) slice for no results so
-// the wire shows "data": [] instead of null. nextCursor is the opaque
-// token for the next page ("" on the last page).
-func (c *Context) ResponseCursor(items any, hasMore bool, nextCursor string) {
-	c.JSON(http.StatusOK, struct {
-		Data       any                       `json:"data"`
-		Pagination envelope.CursorPagination `json:"pagination"`
-	}{
+// nextCursor is the opaque token for the next page ("" on the last page).
+//
+// It is a package-level generic function (methods cannot take type
+// parameters): the []T parameter rejects non-slice payloads at compile
+// time, and a nil slice is normalized so the wire always shows
+// "data": [] instead of null.
+func ResponseCursor[T any](c *Context, items []T, hasMore bool, nextCursor string) {
+	if items == nil {
+		items = []T{}
+	}
+	c.JSON(http.StatusOK, envelope.CursorList[T]{
 		Data:       items,
 		Pagination: envelope.CursorPagination{HasMore: hasMore, NextCursor: nextCursor},
 	})
@@ -61,12 +66,12 @@ func (c *Context) ResponseCursor(items any, hasMore bool, nextCursor string) {
 
 // ResponseOffset replies 200 with the offset-paginated list envelope:
 // { "data": items, "pagination": {total, page, page_size} } (R1 + R5).
-// items must be a slice; pass an empty (non-nil) slice for no results.
-func (c *Context) ResponseOffset(items any, total int64, page, pageSize int) {
-	c.JSON(http.StatusOK, struct {
-		Data       any                       `json:"data"`
-		Pagination envelope.OffsetPagination `json:"pagination"`
-	}{
+// See ResponseCursor for why this is a function and how nil is handled.
+func ResponseOffset[T any](c *Context, items []T, total int64, page, pageSize int) {
+	if items == nil {
+		items = []T{}
+	}
+	c.JSON(http.StatusOK, envelope.OffsetList[T]{
 		Data:       items,
 		Pagination: envelope.OffsetPagination{Total: total, Page: page, PageSize: pageSize},
 	})
