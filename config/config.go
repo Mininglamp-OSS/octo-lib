@@ -228,6 +228,28 @@ type Config struct {
 		SyncIntervalSecond int    // 同步消息间隔时间（单位秒）
 		SyncCount          int    // 每张表每次同步数量 默认100条
 	}
+	// ---------- 消息检索读侧后端切换（YUJ-4530 ETL→Kafka→ES indexer） ----------
+	// ReadBackend 选择检索读路径走哪个后端："zinc"（ZincSearch，默认/现状）或 "es"（OpenSearch + 查询侧 join）。
+	// 双写灰度期保持 ZincSearch 写入开启，仅切读；稳定后才下线 Zinc 写。
+	Search struct {
+		ReadBackend string // "zinc" | "es"，默认 "zinc"
+	}
+	// ---------- Kafka 共享总线（searchetl producer / es-indexer consumer） ----------
+	// 契约 struct 单一真源见 octo-lib contract/searchmsg。两侧 import 同一包。
+	Kafka struct {
+		On       bool     // 是否开启 Kafka 接入（producer 侧；关则 searchetl 仅空跑游标不投递）
+		Brokers  []string // broker 地址列表，如 ["kafka:9092"]
+		Topic    string   // 正文 topic，默认 octo.message.v1
+		DLQTopic string   // 死信 topic，默认 octo.message.v1.dlq
+	}
+	// ---------- es-indexer 的 OpenSearch 写入（独立镜像 binary 用，不复用 ElasticsearchURL/olivere v6） ----------
+	ESIndex struct {
+		On       bool     // 是否开启 OpenSearch bulk 写入
+		Addrs    []string // OpenSearch 节点地址列表，如 ["https://opensearch:9200"]
+		Username string   // 基础认证用户名
+		Password string   // 基础认证密码
+		Index    string   // 索引名（写读同名/或读用别名），默认 octo-message
+	}
 	// ---------- 群 ----------
 	Group struct {
 		SameDayCreateMaxCount     int  // 同一天创建群的最大数量
@@ -523,6 +545,12 @@ func New() *Config {
 		TablePartitionConfig: newTablePartitionConfig(),
 		ElasticsearchURL:     "http://elasticsearch:9200",
 	}
+	// 检索读侧默认走 ZincSearch（现状）；ES 路线由部署显式切换。
+	cfg.Search.ReadBackend = "zinc"
+	// Kafka / ESIndex 默认关闭、地址留空，由部署仓注入（octo-lib 不内置生产端点）。
+	cfg.Kafka.Topic = "octo.message.v1"
+	cfg.Kafka.DLQTopic = "octo.message.v1.dlq"
+	cfg.ESIndex.Index = "octo-message"
 
 	return cfg
 }
@@ -752,6 +780,19 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.ZincSearch.ZincPassword = c.getString("zincSearch.password", c.ZincSearch.ZincPassword)
 	c.ZincSearch.SyncIntervalSecond = c.getInt("zincSearch.syncIntervalSecond", c.ZincSearch.SyncIntervalSecond)
 	c.ZincSearch.SyncCount = c.getInt("zincSearch.syncCount", c.ZincSearch.SyncCount)
+	//#################### 检索读侧后端切换 ####################
+	c.Search.ReadBackend = c.getString("search.readBackend", c.Search.ReadBackend)
+	//#################### Kafka 共享总线 ####################
+	c.Kafka.On = c.getBool("kafka.on", c.Kafka.On)
+	c.Kafka.Brokers = c.getStringSlice("kafka.brokers", c.Kafka.Brokers)
+	c.Kafka.Topic = c.getString("kafka.topic", c.Kafka.Topic)
+	c.Kafka.DLQTopic = c.getString("kafka.dlqTopic", c.Kafka.DLQTopic)
+	//#################### es-indexer OpenSearch 写入 ####################
+	c.ESIndex.On = c.getBool("esIndex.on", c.ESIndex.On)
+	c.ESIndex.Addrs = c.getStringSlice("esIndex.addrs", c.ESIndex.Addrs)
+	c.ESIndex.Username = c.getString("esIndex.username", c.ESIndex.Username)
+	c.ESIndex.Password = c.getString("esIndex.password", c.ESIndex.Password)
+	c.ESIndex.Index = c.getString("esIndex.index", c.ESIndex.Index)
 	//#################### 群 #################
 	c.Group.SameDayCreateMaxCount = c.getInt("group.sameDayCreateMaxCount", c.Group.SameDayCreateMaxCount)
 	c.Group.CreateGroupVerifyFriendOn = c.getBool("group.createGroupVerifyFriendOn", c.Group.CreateGroupVerifyFriendOn)
@@ -835,6 +876,30 @@ func (c *Config) configureLog() {
 func (c *Config) getString(key string, defaultValue string) string {
 	v := c.vp.GetString(key)
 	if v == "" {
+		return defaultValue
+	}
+	return v
+}
+
+// getStringSlice 读取字符串列表配置。支持两种形态：YAML/JSON 数组（["a","b"]），以及
+// 单标量逗号分隔字符串（"a,b" —— env/简写常用）。viper.GetStringSlice 对逗号标量只按
+// 空白切分，不拆逗号，故这里先取标量再按逗号显式拆分兜底。为空（未配置）返回默认值。
+func (c *Config) getStringSlice(key string, defaultValue []string) []string {
+	// 优先取原始标量，命中含逗号的简写形态时显式拆分。
+	if raw := strings.TrimSpace(c.vp.GetString(key)); raw != "" && strings.Contains(raw, ",") {
+		parts := strings.Split(raw, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	v := c.vp.GetStringSlice(key)
+	if len(v) == 0 {
 		return defaultValue
 	}
 	return v
