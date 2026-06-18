@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -11,23 +13,51 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var logger *zap.Logger
-var errorLogger *zap.Logger
-var warnLogger *zap.Logger
-var testLogger *zap.Logger
-var atom = zap.NewAtomicLevel()
+// loggerSet bundles the configured loggers so they can be published as a single
+// unit. Readers load the whole set through an atomic.Pointer, so they observe
+// either a fully-built set or none at all — never a half-initialized one. This
+// mirrors the boxed atomic.Pointer pattern already used in pkg/wkhttp.
+type loggerSet struct {
+	infoLogger  *zap.Logger
+	errorLogger *zap.Logger
+	warnLogger  *zap.Logger
+	testLogger  *zap.Logger
+}
 
+// The package loggers are configured lazily on first use (or eagerly via
+// Configure). configMu serializes (re)configuration so concurrent first-time
+// callers cannot race on the lazy init, while loggers is read lock-free on the
+// hot logging path once configured. atom is shared by the cores and is itself
+// goroutine-safe.
+var (
+	configMu sync.Mutex
+	loggers  atomic.Pointer[loggerSet]
+	atom     = zap.NewAtomicLevel()
+)
+
+// Configure (re)configures the package loggers. It is safe to call concurrently
+// and alongside lazy first-use initialization.
 func Configure(opts *Options) {
+	configMu.Lock()
+	defer configMu.Unlock()
+	configureLocked(opts)
+}
+
+// configureLocked builds the loggers, publishes them as one set, and returns it.
+// Callers must hold configMu.
+func configureLocked(opts *Options) *loggerSet {
 	atom.SetLevel(opts.Level)
-	core := zapcore.NewCore(
+
+	stdoutCore := zapcore.NewCore(
 		zapcore.NewJSONEncoder(newEncoderConfig()),
 		zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout)),
 		atom,
 	)
+	var test *zap.Logger
 	if opts.LineNum {
-		testLogger = zap.New(core, zap.AddCaller())
+		test = zap.New(stdoutCore, zap.AddCaller())
 	} else {
-		testLogger = zap.New(core)
+		test = zap.New(stdoutCore)
 	}
 
 	infoWriter := zapcore.AddSync(&lumberjack.Logger{
@@ -36,15 +66,16 @@ func Configure(opts *Options) {
 		MaxBackups: 3,
 		MaxAge:     28, // days
 	})
-	core = zapcore.NewCore(
+	infoCore := zapcore.NewCore(
 		zapcore.NewJSONEncoder(newEncoderConfig()),
 		zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout), zapcore.AddSync(infoWriter)),
 		atom,
 	)
+	var info *zap.Logger
 	if opts.LineNum {
-		logger = zap.New(core, zap.AddCaller())
+		info = zap.New(infoCore, zap.AddCaller())
 	} else {
-		logger = zap.New(core)
+		info = zap.New(infoCore)
 	}
 
 	errorWriter := zapcore.AddSync(&lumberjack.Logger{
@@ -53,15 +84,16 @@ func Configure(opts *Options) {
 		MaxBackups: 3,
 		MaxAge:     28, // days
 	})
-	core = zapcore.NewCore(
+	errorCore := zapcore.NewCore(
 		zapcore.NewJSONEncoder(newEncoderConfig()),
 		zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout), zapcore.AddSync(errorWriter)),
 		zap.ErrorLevel,
 	)
+	var errLogger *zap.Logger
 	if opts.LineNum {
-		errorLogger = zap.New(core, zap.AddCaller())
+		errLogger = zap.New(errorCore, zap.AddCaller())
 	} else {
-		errorLogger = zap.New(core)
+		errLogger = zap.New(errorCore)
 	}
 
 	warnWriter := zapcore.AddSync(&lumberjack.Logger{
@@ -70,17 +102,43 @@ func Configure(opts *Options) {
 		MaxBackups: 3,
 		MaxAge:     28, // days
 	})
-	core = zapcore.NewCore(
+	warnCore := zapcore.NewCore(
 		zapcore.NewJSONEncoder(newEncoderConfig()),
 		zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout), zapcore.AddSync(warnWriter)),
 		zap.WarnLevel,
 	)
+	var warn *zap.Logger
 	if opts.LineNum {
-		warnLogger = zap.New(core, zap.AddCaller())
+		warn = zap.New(warnCore, zap.AddCaller())
 	} else {
-		warnLogger = zap.New(core)
+		warn = zap.New(warnCore)
 	}
 
+	set := &loggerSet{
+		infoLogger:  info,
+		errorLogger: errLogger,
+		warnLogger:  warn,
+		testLogger:  test,
+	}
+	loggers.Store(set)
+	return set
+}
+
+// current returns the published logger set, lazily configuring it with default
+// options on first use. Because the set is published as a single atomic pointer,
+// the returned value always has every logger built — there is no window where one
+// logger is set and another is still nil. The lock-free fast path keeps the hot
+// logging path free of contention once configured.
+func current() *loggerSet {
+	if ls := loggers.Load(); ls != nil {
+		return ls
+	}
+	configMu.Lock()
+	defer configMu.Unlock()
+	if ls := loggers.Load(); ls != nil { // another goroutine configured while we waited
+		return ls
+	}
+	return configureLocked(NewOptions())
 }
 
 func newEncoderConfig() zapcore.EncoderConfig {
@@ -110,38 +168,22 @@ func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 
 // Info Info
 func Info(msg string, fields ...zap.Field) {
-
-	if logger == nil {
-		Configure(NewOptions())
-	}
-	logger.Info(msg, fields...)
+	current().infoLogger.Info(msg, fields...)
 }
 
 // Debug Debug
 func Debug(msg string, fields ...zap.Field) {
-
-	if logger == nil {
-		Configure(NewOptions())
-	}
-	logger.Debug(msg, fields...)
-
+	current().infoLogger.Debug(msg, fields...)
 }
 
 // Error Error
 func Error(msg string, fields ...zap.Field) {
-	if errorLogger == nil {
-		Configure(NewOptions())
-	}
-	errorLogger.Error(msg, fields...)
+	current().errorLogger.Error(msg, fields...)
 }
 
 // Warn Warn
 func Warn(msg string, fields ...zap.Field) {
-
-	if warnLogger == nil {
-		Configure(NewOptions())
-	}
-	warnLogger.Warn(msg, fields...)
+	current().warnLogger.Warn(msg, fields...)
 }
 
 // Log Log
