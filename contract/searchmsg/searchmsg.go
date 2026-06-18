@@ -11,12 +11,18 @@
 //     只需换「谁往 Kafka 写」，下游零改。
 //   - 带 SchemaVersion：consumer 见未知版本必须进 DLQ，**不得静默吃**。
 //   - 撤回/删除态**绝不进**该契约（路线甲：读时回 MySQL join 过滤）。这里只承载正文 +
-//     查询侧鉴权所需的可见性字段（ChannelID/ChannelType/FromUID）。
+//     查询侧鉴权所需的可见性字段（ChannelID/ChannelType/FromUID/SpaceID/Visibles/MessageSeq）。
 package searchmsg
 
 // SchemaVersion 是当前正文契约的版本号。每次对 Message 做不兼容变更（删字段/改语义/
 // 改类型）必须 +1；consumer 收到非本值的消息一律进 DLQ，不得按旧结构强解。
-const SchemaVersion = 1
+//
+// v2（本次）：新增 reader 必读的安全/正确性字段 SpaceID / Visibles / MessageSeq。
+// 三字段与 octo-search-indexer esindex.Doc（spaceId/visibles/messageSeq）逐字段对齐：
+// indexer 的 SafetyFieldsSchemaVersion==2 + LiveContractCarriesSafetyFields()（仅判
+// searchmsg.SchemaVersion >= 2）据此在 indexer 重 pin 到本契约后自动解封实时写入封锁
+// （否则空 visibles → reader fail-OPEN，群系统消息普通成员能搜出群管才可见消息）。
+const SchemaVersion = 2
 
 // SourceETLMessageTable 是 ETL（读 message 表）阶段的 Source 取值。
 // 未来升级到 Outbox+CDC 时改该值（如 "cdc-binlog"），下游据此区分来源但不改解析逻辑。
@@ -45,6 +51,16 @@ type Message struct {
 	// FromUID 发送者 uid。
 	FromUID string `json:"from_uid"`
 
+	// SpaceID 空间隔离 id（对齐 indexer esindex.Doc.SpaceID `spaceId`）。p2p(DM) 召回
+	// 过滤依赖此字段；reader 对空 SpaceID 走 fail-closed（同 space 也 0 命中），故 producer
+	// 富化前实时路径写空属安全方向。omitempty 与 indexer 一致。
+	SpaceID string `json:"space_id,omitempty"`
+	// Visibles 群消息可见性白名单（对齐 indexer esindex.Doc.Visibles `visibles`）。群系统
+	// 消息「仅管理员可见」gate 强依赖此字段；reader 对空 Visibles 是 **fail-OPEN**（普通成员
+	// 能搜出群管才可见消息），故必须由 producer 富化后下游才能安全启用实时写入。omitempty 与
+	// indexer 一致。
+	Visibles []string `json:"visibles,omitempty"`
+
 	// Content 消息正文（从 payload 解出的可检索文本）。
 	// 当 RawExcluded=true（Signal 加密 / 非文本类）时为 nil（不算丢消息）。
 	Content *string `json:"content"`
@@ -60,6 +76,12 @@ type Message struct {
 	MsgTimestamp int64 `json:"msg_timestamp"`
 	// CreatedAt 落库时间（纪元秒，= UNIX_TIMESTAMP(message.created_at)）。
 	CreatedAt int64 `json:"created_at"`
+
+	// MessageSeq 频道内消息序号（取自 message.message_seq 列；对齐 indexer
+	// esindex.Doc.MessageSeq `messageSeq`，uint64 全精度）。reader channel_offset
+	// 「清空会话」gate（visibility.go）依赖此字段，缺/0 则保守隐藏（安全方向）。omitempty
+	// 与 indexer 一致。
+	MessageSeq uint64 `json:"message_seq,omitempty"`
 
 	// Source 数据来源标识，ETL 阶段 = SourceETLMessageTable；CDC 阶段换值，下游不改解析。
 	Source string `json:"source"`
