@@ -43,9 +43,9 @@ func Configure(opts *Options) {
 	configureLocked(opts)
 }
 
-// configureLocked builds the loggers and publishes them as one set. Callers must
-// hold configMu.
-func configureLocked(opts *Options) {
+// configureLocked builds the loggers, publishes them as one set, and returns it.
+// Callers must hold configMu.
+func configureLocked(opts *Options) *loggerSet {
 	atom.SetLevel(opts.Level)
 
 	stdoutCore := zapcore.NewCore(
@@ -114,12 +114,14 @@ func configureLocked(opts *Options) {
 		warn = zap.New(warnCore)
 	}
 
-	loggers.Store(&loggerSet{
+	set := &loggerSet{
 		infoLogger:  info,
 		errorLogger: errLogger,
 		warnLogger:  warn,
 		testLogger:  test,
-	})
+	}
+	loggers.Store(set)
+	return set
 }
 
 // current returns the published logger set, lazily configuring it with default
@@ -132,11 +134,11 @@ func current() *loggerSet {
 		return ls
 	}
 	configMu.Lock()
-	if loggers.Load() == nil {
-		configureLocked(NewOptions())
+	defer configMu.Unlock()
+	if ls := loggers.Load(); ls != nil { // another goroutine configured while we waited
+		return ls
 	}
-	configMu.Unlock()
-	return loggers.Load()
+	return configureLocked(NewOptions())
 }
 
 func newEncoderConfig() zapcore.EncoderConfig {

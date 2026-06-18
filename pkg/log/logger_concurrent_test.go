@@ -37,6 +37,10 @@ func TestConcurrentLazyInit(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
+
+	if loggers.Load() == nil {
+		t.Fatal("loggers should be configured after concurrent lazy-init use")
+	}
 }
 
 // TestConcurrentConfigureAndLog ensures explicit Configure is safe alongside
@@ -63,4 +67,8 @@ func TestConcurrentConfigureAndLog(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
+
+	if loggers.Load() == nil {
+		t.Fatal("loggers should be configured after concurrent Configure/log use")
+	}
 }
