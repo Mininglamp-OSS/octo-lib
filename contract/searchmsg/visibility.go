@@ -17,8 +17,8 @@ var ErrVisibilityFailClosed = errors.New("searchmsg: visibility fail-closed")
 // （SpaceID / Visibles）——这是 octo-im 消息检索管线 fail-closed 可见性口径的**单一真源**。
 //
 // 三方共用（强制 (a) 抽 octo-lib，禁 (b) 各仓重实现，防 #1124 口径分叉）：
-//   - octo-server searchetl producer（实时 + backfill 富化时填 searchmsg.Message.SpaceID/Visibles）
-//   - octo-search-indexer backfill（docFromRow 富化 esindex.Doc.SpaceID/Visibles）
+//   - octo-search-indexer 的 producer（实时富化时填 searchmsg.Message.SpaceID/Visibles）
+//   - octo-search-indexer 的 backfill（docFromRow 历史富化 esindex.Doc.SpaceID/Visibles）
 //   - 未来 reader 侧若需从 payload 复核可见性
 //
 // 仅对**非加密**消息调用：Signal 加密 DM 的 payload 是密文，调用方应在调用前判加密并直接

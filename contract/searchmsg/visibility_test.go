@@ -7,7 +7,7 @@ import (
 )
 
 // TestExtractVisibility_SharedVectors 跑共享 fail-closed 向量集，锁口径单一真源。
-// octo-server searchetl 与 octo-search-indexer backfill 各自 import 同一组向量跑同样断言，
+// octo-search-indexer 的 producer 与 backfill 各自 import 同一组向量跑同样断言，
 // 防 #1124 在不同仓重新分叉（验收门 (ii)）。
 func TestExtractVisibility_SharedVectors(t *testing.T) {
 	for _, v := range FailClosedVisibilityVectors() {
