@@ -1,8 +1,8 @@
 // Package searchmsg 定义 octo-im 消息检索管线的 Kafka 契约 —— 单一真源。
 //
-// 该契约被两侧 import：octo-server 的 searchetl producer（往 Kafka 写），以及
-// 独立镜像 es-indexer consumer（从 Kafka 读、bulk 写 OpenSearch）。把 struct 放在
-// octo-lib（三仓共享 config 宿主）是硬要求：若放 octo-server，独立镜像的 es-indexer
+// 该契约被两侧 import：独立镜像 octo-search-indexer 的 producer（往 Kafka 写），以及
+// es-indexer consumer（从 Kafka 读、bulk 写 OpenSearch）。把 struct 放在
+// octo-lib（三仓共享 config 宿主）是硬要求：若放 octo-search-indexer，独立镜像的 es-indexer
 // 无法 import，会出现「编译过但运行期字段错位静默吃数据」。
 //
 // 设计纪律：
