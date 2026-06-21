@@ -234,14 +234,6 @@ type Config struct {
 	Search struct {
 		ReadBackend string // "zinc" | "es"，默认 "zinc"
 	}
-	// ---------- Kafka 共享总线（searchetl producer / es-indexer consumer） ----------
-	// 契约 struct 单一真源见 octo-lib contract/searchmsg。两侧 import 同一包。
-	Kafka struct {
-		On       bool     // 是否开启 Kafka 接入（producer 侧；关则 searchetl 仅空跑游标不投递）
-		Brokers  []string // broker 地址列表，如 ["kafka:9092"]
-		Topic    string   // 正文 topic，默认 octo.message.v1
-		DLQTopic string   // 死信 topic，默认 octo.message.v1.dlq
-	}
 	// ---------- es-indexer 的 OpenSearch 写入（独立镜像 binary 用，不复用 ElasticsearchURL/olivere v6） ----------
 	ESIndex struct {
 		On       bool     // 是否开启 OpenSearch bulk 写入
@@ -547,9 +539,7 @@ func New() *Config {
 	}
 	// 检索读侧默认走 ZincSearch（现状）；ES 路线由部署显式切换。
 	cfg.Search.ReadBackend = "zinc"
-	// Kafka / ESIndex 默认关闭、地址留空，由部署仓注入（octo-lib 不内置生产端点）。
-	cfg.Kafka.Topic = "octo.message.v1"
-	cfg.Kafka.DLQTopic = "octo.message.v1.dlq"
+	// ESIndex 默认关闭、地址留空，由部署仓注入（octo-lib 不内置生产端点）。
 	cfg.ESIndex.Index = "octo-message"
 
 	return cfg
@@ -782,11 +772,6 @@ func (c *Config) ConfigureWithViper(vp *viper.Viper) {
 	c.ZincSearch.SyncCount = c.getInt("zincSearch.syncCount", c.ZincSearch.SyncCount)
 	//#################### 检索读侧后端切换 ####################
 	c.Search.ReadBackend = c.getString("search.readBackend", c.Search.ReadBackend)
-	//#################### Kafka 共享总线 ####################
-	c.Kafka.On = c.getBool("kafka.on", c.Kafka.On)
-	c.Kafka.Brokers = c.getStringSlice("kafka.brokers", c.Kafka.Brokers)
-	c.Kafka.Topic = c.getString("kafka.topic", c.Kafka.Topic)
-	c.Kafka.DLQTopic = c.getString("kafka.dlqTopic", c.Kafka.DLQTopic)
 	//#################### es-indexer OpenSearch 写入 ####################
 	c.ESIndex.On = c.getBool("esIndex.on", c.ESIndex.On)
 	c.ESIndex.Addrs = c.getStringSlice("esIndex.addrs", c.ESIndex.Addrs)
