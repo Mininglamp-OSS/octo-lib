@@ -2,7 +2,7 @@ package searchmsg
 
 // 本文件是**非测试**源码（不带 _test.go 后缀），故可被任意外部仓 import。它把
 // ExtractVisibility 的 fail-closed 测试向量收敛为单一真源，供三方共用，锁口径：
-//   - octo-server  modules/searchetl 的 producer fail-closed 单测
+//   - octo-search-indexer 的 producer 富化路径 fail-closed 单测
 //   - octo-search-indexer backfill 富化路径单测
 // 两侧跑**同一组**向量（验收门 (ii)：同口径锁），防 #1124 在不同仓重新分叉。
 
