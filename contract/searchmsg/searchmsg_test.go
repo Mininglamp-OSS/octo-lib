@@ -129,6 +129,66 @@ func keysOf(m map[string]json.RawMessage) []string {
 	return ks
 }
 
+// TestRawPayloadRoundTrip 确认方案 B 新增的 RawPayload（json.RawMessage）原始 payload 整包
+// 经 Kafka 线格 JSON 往返不丢、不二次转义（json.RawMessage 内联原始字节，零 base64 膨胀），
+// 线格 key 为 snake_case raw_payload。
+func TestRawPayloadRoundTrip(t *testing.T) {
+	raw := json.RawMessage(`{"type":2,"name":"合同.png","url":"https://x/y.png"}`)
+	in := Message{
+		SchemaVersion: SchemaVersion,
+		MessageID:     "1",
+		RawPayload:    raw,
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(b, &top); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got, ok := top["raw_payload"]
+	if !ok {
+		t.Fatalf("expected snake_case wire key raw_payload present, got keys %v", keysOf(top))
+	}
+	// 内联存原始 JSON 对象（不是 base64 字符串）：首字节应为 '{'，不带引号包裹。
+	if len(got) == 0 || got[0] != '{' {
+		t.Fatalf("raw_payload must be inlined JSON (json.RawMessage), got %s", got)
+	}
+	var out Message
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("round-trip unmarshal: %v", err)
+	}
+	if string(out.RawPayload) != string(raw) {
+		t.Fatalf("RawPayload round-trip mismatch: got %s want %s", out.RawPayload, raw)
+	}
+}
+
+// TestRawPayloadOmitEmpty 确认 RawPayload 为空时按 omitempty 省略（在飞老 v2 / 加密消息
+// 不带该字段，消费侧据其有无分流）。
+func TestRawPayloadOmitEmpty(t *testing.T) {
+	in := Message{SchemaVersion: SchemaVersion, MessageID: "1"}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := raw["raw_payload"]; ok {
+		t.Fatalf("expected raw_payload omitted when empty, got %s", raw["raw_payload"])
+	}
+}
+
+// TestRawPayloadDoesNotBumpSchema 确认新增 RawPayload 不改变契约版本（增量 optional，
+// 不 bump：consumer 严格相等校验，bump 会让在飞 v2 消息全进 DLQ）。
+func TestRawPayloadDoesNotBumpSchema(t *testing.T) {
+	if SchemaVersion != 2 {
+		t.Fatalf("RawPayload is an additive optional field and must NOT bump SchemaVersion; got %d want 2", SchemaVersion)
+	}
+}
+
 // TestRawExcludedNullContent 确认 raw_excluded 时 content 序列化为 JSON null。
 func TestRawExcludedNullContent(t *testing.T) {
 	in := Message{
