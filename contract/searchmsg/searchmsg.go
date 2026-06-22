@@ -16,6 +16,8 @@
 //     查询侧鉴权所需的可见性字段（ChannelID/ChannelType/FromUID/SpaceID/Visibles/MessageSeq）。
 package searchmsg
 
+import "encoding/json"
+
 // SchemaVersion 是当前正文契约的版本号。每次对 Message 做不兼容变更（删字段/改语义/
 // 改类型）必须 +1；consumer 收到非本值的消息一律进 DLQ，不得按旧结构强解。
 //
@@ -68,6 +70,21 @@ type Message struct {
 	Content *string `json:"content"`
 	// ContentType 消息内容类型（payload.type，规约为 int）。
 	ContentType int `json:"content_type"`
+
+	// RawPayload 是非加密消息的原始 payload 整包（明文 JSON）。方案 B（CDC 式写入）：
+	// producer 退化为只发原始 payload，正文投影 + visibility fail-closed 解析全部下沉到
+	// es-indexer 消费侧（由它从本字段解析）。
+	//
+	// 设计：
+	//   - 用 json.RawMessage（内联存原始 JSON 字节）而非 []byte：[]byte 经 Go json 编码会
+	//     转成 base64 字符串、膨胀 ~33%，挤压 Kafka 1MiB 写侧硬限；json.RawMessage 零膨胀且
+	//     Kafka 侧人工排障可读。
+	//   - 加密消息（RawExcluded=true 的 Signal DM）此字段为 nil（密文不外发），消费侧据
+	//     「len(RawPayload)==0 且 RawExcluded==true」识别加密分支、绝不把密文喂进解析器。
+	//   - 增量 optional（omitempty）：不 bump SchemaVersion（consumer 严格相等校验，bump 会让
+	//     在飞 v2 消息全进 DLQ）。在飞老 v2 消息无此字段，消费侧据「len(RawPayload)>0」分流到
+	//     新形态投影、否则回退旧 Content/ContentType 路径。
+	RawPayload json.RawMessage `json:"raw_payload,omitempty"`
 
 	// RawExcluded 标记「已知不可索引类」：Signal 加密 DM（payload 非明文）或非文本结构化
 	// 内容。为 true 时 Content 置 nil，走正常流不进 DLQ —— 与「本应可解析却解析失败的真
