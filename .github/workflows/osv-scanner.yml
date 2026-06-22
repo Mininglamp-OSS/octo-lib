@@ -17,7 +17,14 @@ permissions:
 jobs:
   scan-scheduled:
     if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2  # v2.3.8
+    # Pinned to the commit that adds `export-results` (default false) so the
+    # reusable workflow no longer cats the full scan JSON into job outputs.
+    # Without it the "Export results" step can exceed GitHub's 1,048,576-byte
+    # job-output limit and fail the run even when the scan itself is green.
+    # This commit only adds the gating flag; the inner osv-scanner/reporter
+    # actions stay pinned to v2.3.8. Revert to a release tag once one ships
+    # that includes this fix (post-v2.3.8).
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@3a7550f43ba5b58905a821ce3a0ed24c4858b3f4  # export-results gating, inner actions v2.3.8
     with:
       scan-args: |-
         -r
@@ -31,7 +38,14 @@ jobs:
 
   scan-pr:
     if: github.event_name == 'pull_request'
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2  # v2.3.8
+    # Pinned to the commit that adds `export-results` (default false). The PR
+    # reusable workflow used to cat both old/new scan JSON into job outputs,
+    # which tripped GitHub's 1,048,576-byte job-output limit ("Job outputs
+    # exceed 1,048,576 bytes") and failed scan-pr even though the scan passed.
+    # We don't consume those outputs, so leaving export-results at its default
+    # (false) removes the oversized output. Inner actions remain v2.3.8.
+    # Revert to a release tag once one ships that includes this fix (post-v2.3.8).
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@3a7550f43ba5b58905a821ce3a0ed24c4858b3f4  # export-results gating, inner actions v2.3.8
     with:
       scan-args: |-
         -r
