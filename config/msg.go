@@ -1035,6 +1035,7 @@ type ChannelInfoCreateReq struct {
 	ChannelType uint8  `json:"channel_type"` // 频道类型
 	Ban         int    `json:"ban"`          // 是否封禁
 	Large       int    `json:"large"`        // 是否大群
+	Disband     int    `json:"disband"`      // 是否解散（1.已解散，WuKongIM 在发送权限检查最前面拒绝所有发送者，含群主）
 }
 
 // ChannelReq ChannelReq
