@@ -11,7 +11,6 @@ import (
 	"github.com/Mininglamp-OSS/octo-lib/pkg/log"
 	"github.com/gin-gonic/gin"
 	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
 )
 
 // UserRole 用户角色
@@ -83,17 +82,6 @@ func (c *Context) reset() {
 func (c *Context) ResponseError(err error) {
 	c.JSON(http.StatusBadRequest, gin.H{
 		"msg":    err.Error(),
-		"status": http.StatusBadRequest,
-	})
-}
-
-// ResponseErrorf ResponseErrorf
-func (c *Context) ResponseErrorf(msg string, err error) {
-	if err != nil {
-		c.lg.Error(msg, zap.Error(err), zap.String("path", c.FullPath()))
-	}
-	c.JSON(http.StatusBadRequest, gin.H{
-		"msg":    msg,
 		"status": http.StatusBadRequest,
 	})
 }
