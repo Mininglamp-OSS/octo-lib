@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -168,22 +169,69 @@ func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 
 // Info Info
 func Info(msg string, fields ...zap.Field) {
-	current().infoLogger.Info(msg, fields...)
+	current().infoLogger.Info(SanitizeForLog(msg), sanitizeFields(fields)...)
 }
 
 // Debug Debug
 func Debug(msg string, fields ...zap.Field) {
-	current().infoLogger.Debug(msg, fields...)
+	current().infoLogger.Debug(SanitizeForLog(msg), sanitizeFields(fields)...)
 }
 
 // Error Error
 func Error(msg string, fields ...zap.Field) {
-	current().errorLogger.Error(msg, fields...)
+	current().errorLogger.Error(SanitizeForLog(msg), sanitizeFields(fields)...)
 }
 
 // Warn Warn
 func Warn(msg string, fields ...zap.Field) {
-	current().warnLogger.Warn(msg, fields...)
+	current().warnLogger.Warn(SanitizeForLog(msg), sanitizeFields(fields)...)
+}
+
+// SanitizeForLog strips CR, LF, and TAB from s so attacker-controlled bytes
+// cannot forge new log entries when written to a line-oriented sink. The
+// characters are removed (not replaced with spaces) so adjacent tokens collapse
+// rather than introduce a misleading whitespace separator.
+func SanitizeForLog(s string) string {
+	if !strings.ContainsAny(s, "\r\n\t") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\r', '\n', '\t':
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// sanitizeFields returns fields with every string-typed zap.Field's value passed
+// through SanitizeForLog. Non-string fields are returned untouched. The input
+// slice is not mutated; a new slice is only allocated if a sanitization actually
+// changes a value.
+func sanitizeFields(fields []zap.Field) []zap.Field {
+	for i, f := range fields {
+		if f.Type != zapcore.StringType {
+			continue
+		}
+		clean := SanitizeForLog(f.String)
+		if clean == f.String {
+			continue
+		}
+		out := make([]zap.Field, len(fields))
+		copy(out, fields)
+		out[i].String = clean
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Type == zapcore.StringType {
+				out[j].String = SanitizeForLog(out[j].String)
+			}
+		}
+		return out
+	}
+	return fields
 }
 
 // Log Log
