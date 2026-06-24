@@ -90,7 +90,7 @@ func (c *memoryCore) Sync() error { return nil }
 // wiring across ALL four package-level wrappers. The PR description promises
 // that removing SanitizeForLog from ANY of Info/Debug/Error/Warn must turn this
 // test red. An earlier version only exercised Info, leaving Debug/Error/Warn
-// silently uncovered (caught by reviewer 李飞飞 on PR #93). Do NOT collapse this
+// silently uncovered (caught by reviewer Li Feifei on PR #93). Do NOT collapse this
 // back to a single-wrapper test without re-proving the universal-coverage
 // property.
 //
