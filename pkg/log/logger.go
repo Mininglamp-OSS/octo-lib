@@ -187,20 +187,34 @@ func Warn(msg string, fields ...zap.Field) {
 	current().warnLogger.Warn(SanitizeForLog(msg), sanitizeFields(fields)...)
 }
 
-// SanitizeForLog strips CR, LF, and TAB from s so attacker-controlled bytes
-// cannot forge new log entries when written to a line-oriented sink. The
-// characters are removed (not replaced with spaces) so adjacent tokens collapse
-// rather than introduce a misleading whitespace separator.
+// SanitizeForLog neutralizes bytes that attackers can use to forge new log
+// entries in a line-oriented sink. It handles two classes:
+//
+//   - Stripped (removed entirely): CR (\r), LF (\n), TAB (\t), NUL (\x00).
+//     These are ASCII control bytes; removing them collapses adjacent tokens
+//     rather than introducing a misleading whitespace separator.
+//   - Replaced with a single space (' '): U+2028 LINE SEPARATOR and U+2029
+//     PARAGRAPH SEPARATOR. These are multi-byte Unicode line terminators that
+//     some log viewers and JS-based tools treat as newlines. They are replaced
+//     (not stripped) because a missing space between two words is more likely
+//     to corrupt human-readable content than CR/LF would; \r\n/\t/\x00 do not
+//     have that risk because they would never appear between words in normal
+//     text.
+//
+// Other control characters (e.g. ESC, BEL) are left untouched — this function
+// targets log-injection vectors, not arbitrary terminal-escape sanitization.
 func SanitizeForLog(s string) string {
-	if !strings.ContainsAny(s, "\r\n\t") {
+	if !strings.ContainsAny(s, "\r\n\t\x00") && !strings.Contains(s, " ") && !strings.Contains(s, " ") {
 		return s
 	}
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
 		switch r {
-		case '\r', '\n', '\t':
+		case '\r', '\n', '\t', '\x00':
 			continue
+		case ' ', ' ':
+			b.WriteByte(' ')
 		default:
 			b.WriteRune(r)
 		}

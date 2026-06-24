@@ -10,23 +10,38 @@ import (
 )
 
 func TestSanitizeForLog(t *testing.T) {
-	// Strategy: strip \r \n \t entirely (no replacement char) so adjacent tokens
-	// collapse rather than introduce misleading whitespace separators.
+	// Strategy (must stay in sync with SanitizeForLog's doc comment):
+	//   - strip \r \n \t \x00 (ASCII control bytes — adjacent tokens collapse)
+	//   - replace U+2028 / U+2029 with a single space (multi-byte Unicode line
+	//     separators — replacement avoids running words together)
+	const ls = " " // LINE SEPARATOR, bytes E2 80 A8
+	const ps = " " // PARAGRAPH SEPARATOR, bytes E2 80 A9
 	cases := []struct {
+		name string
 		in   string
 		want string
 	}{
-		{"hello\nworld", "helloworld"},
-		{"\r\n\t", ""},
-		{"plain", "plain"},
-		{"mixed\r\nvalue\twith\nall", "mixedvaluewithall"},
-		{"", ""},
-		{"unicode 中文 \n ok", "unicode 中文  ok"},
+		{"plain unchanged", "plain", "plain"},
+		{"empty", "", ""},
+		{"cr alone stripped", "a\rb", "ab"},
+		{"lf alone stripped", "a\nb", "ab"},
+		{"tab alone stripped", "a\tb", "ab"},
+		{"crlf stripped", "a\r\nb", "ab"},
+		{"nul stripped", "a\x00b", "ab"},
+		{"all ascii controls", "\r\n\t\x00", ""},
+		{"mixed ascii controls", "mixed\r\nvalue\twith\nall\x00", "mixedvaluewithall"},
+		{"unicode preserved around lf", "unicode 中文 \n ok", "unicode 中文  ok"},
+		{"u2028 replaced with space", "a" + ls + "b", "a b"},
+		{"u2029 replaced with space", "a" + ps + "b", "a b"},
+		{"u2028 and u2029 mixed", "x" + ls + "y" + ps + "z", "x y z"},
+		{"all vectors combined", "a\r\nb\tc\x00d" + ls + "e" + ps + "f", "abcd e f"},
 	}
 	for _, tc := range cases {
-		if got := SanitizeForLog(tc.in); got != tc.want {
-			t.Errorf("SanitizeForLog(%q) = %q, want %q", tc.in, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SanitizeForLog(tc.in); got != tc.want {
+				t.Errorf("SanitizeForLog(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -63,6 +78,14 @@ func (c *memoryCore) Write(ent zapcore.Entry, fields []zapcore.Field) error {
 
 func (c *memoryCore) Sync() error { return nil }
 
+// TestWrappersSanitizeMessageAndFields is the anti-假绿 / mutation check for
+// the wrapper wiring. It captures emitted entries through an in-memory zap core
+// and asserts both message and string-typed fields are sanitized.
+//
+// Mutation check: if you remove the SanitizeForLog call in Info/Debug/Error/Warn,
+// or the sanitizeFields call alongside it, this test must turn red. If you make
+// that change and this test stays green, the test is broken — fix the test, not
+// the production code.
 func TestWrappersSanitizeMessageAndFields(t *testing.T) {
 	var captured atomic.Pointer[[]capturedEntry]
 	empty := []capturedEntry{}
