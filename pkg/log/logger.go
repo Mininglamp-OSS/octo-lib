@@ -152,8 +152,8 @@ func newEncoderConfig() zapcore.EncoderConfig {
 		MessageKey:    "msg",
 		StacktraceKey: "stacktrace",
 		LineEnding:    zapcore.DefaultLineEnding,
-		EncodeLevel:   zapcore.LowercaseLevelEncoder, // lowercase encoder
-		EncodeCaller:  zapcore.FullCallerEncoder,     // full-path encoder
+		EncodeLevel:   zapcore.LowercaseLevelEncoder, // 小写编码器
+		EncodeCaller:  zapcore.FullCallerEncoder,     // 全路径编码器
 		EncodeName:    zapcore.FullNameEncoder,
 		EncodeTime: func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 			enc.AppendString(t.Format("2006-01-02 15:04:05"))
@@ -273,7 +273,7 @@ type Log interface {
 
 // LIMLog TLog
 type TLog struct {
-	prefix string // log prefix
+	prefix string // 日志前缀
 }
 
 // NewLIMLog NewLIMLog
