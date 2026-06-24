@@ -1,6 +1,7 @@
 package log
 
 import (
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -35,6 +36,7 @@ func TestSanitizeForLog(t *testing.T) {
 		{"u2029 replaced with space", "a" + ps + "b", "a b"},
 		{"u2028 and u2029 mixed", "x" + ls + "y" + ps + "z", "x y z"},
 		{"all vectors combined", "a\r\nb\tc\x00d" + ls + "e" + ps + "f", "abcd e f"},
+		{"mixed", "x\r\n\t\x00" + ls + ps + "y", "x  y"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,6 +89,11 @@ func (c *memoryCore) Sync() error { return nil }
 // that change and this test stays green, the test is broken — fix the test, not
 // the production code.
 func TestWrappersSanitizeMessageAndFields(t *testing.T) {
+	// Mutation check: this test is the canary for the wrapper sanitization wiring.
+	// If you remove the SanitizeForLog call from Info/Debug/Error/Warn (or from
+	// sanitizeFields), this test MUST turn red. If it stays green after such a
+	// removal, the test itself is broken and needs to be tightened. Do not weaken
+	// the assertions below without re-proving this property.
 	var captured atomic.Pointer[[]capturedEntry]
 	empty := []capturedEntry{}
 	captured.Store(&empty)
@@ -144,5 +151,63 @@ func TestWrappersSanitizeMessageAndFields(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("did not see field k in captured entry")
+	}
+}
+
+// Reverse assertion: SanitizeForLog must only sanitize StringType fields.
+// zap.Error(err) uses ErrorType field and must pass through unchanged — this
+// proves the layering is clean and we're not accidentally stripping data from
+// structured error fields (which would lose stack traces, wrapped error
+// chains, etc.).
+func TestSanitizeFieldsLeavesErrorFieldUnchanged(t *testing.T) {
+	var captured atomic.Pointer[[]capturedEntry]
+	empty := []capturedEntry{}
+	captured.Store(&empty)
+	core := &memoryCore{LevelEnabler: zap.DebugLevel, entries: &captured}
+
+	prev := loggers.Load()
+	t.Cleanup(func() {
+		if prev == nil {
+			loggers.Store(nil)
+		} else {
+			loggers.Store(prev)
+		}
+	})
+	memLogger := zap.New(core)
+	loggers.Store(&loggerSet{
+		infoLogger:  memLogger,
+		errorLogger: memLogger,
+		warnLogger:  memLogger,
+		testLogger:  memLogger,
+	})
+
+	err := errors.New("error with\nnewline in message")
+	Error("test msg", zap.Error(err))
+
+	got := captured.Load()
+	if len(*got) != 1 {
+		t.Fatalf("expected 1 captured entry, got %d", len(*got))
+	}
+	entry := (*got)[0]
+
+	var found bool
+	for _, f := range entry.fields {
+		if f.Key != "error" {
+			continue
+		}
+		found = true
+		if f.Type != zapcore.ErrorType {
+			t.Errorf("error field unexpectedly non-error type: %v", f.Type)
+		}
+		got, ok := f.Interface.(error)
+		if !ok {
+			t.Fatalf("error field Interface not error: %T", f.Interface)
+		}
+		if !strings.Contains(got.Error(), "\n") {
+			t.Errorf("error field message was sanitized: %q (expected to contain \\n)", got.Error())
+		}
+	}
+	if !found {
+		t.Fatal("did not see error field in captured entry")
 	}
 }
