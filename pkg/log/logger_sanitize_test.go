@@ -15,8 +15,8 @@ func TestSanitizeForLog(t *testing.T) {
 	//   - strip \r \n \t \x00 (ASCII control bytes — adjacent tokens collapse)
 	//   - replace U+2028 / U+2029 with a single space (multi-byte Unicode line
 	//     separators — replacement avoids running words together)
-	const ls = " " // LINE SEPARATOR, bytes E2 80 A8
-	const ps = " " // PARAGRAPH SEPARATOR, bytes E2 80 A9
+	const ls = "\u2028" // LINE SEPARATOR, bytes E2 80 A8
+	const ps = "\u2029" // PARAGRAPH SEPARATOR, bytes E2 80 A9
 	cases := []struct {
 		name string
 		in   string
@@ -31,12 +31,14 @@ func TestSanitizeForLog(t *testing.T) {
 		{"nul stripped", "a\x00b", "ab"},
 		{"all ascii controls", "\r\n\t\x00", ""},
 		{"mixed ascii controls", "mixed\r\nvalue\twith\nall\x00", "mixedvaluewithall"},
-		{"unicode preserved around lf", "unicode 中文 \n ok", "unicode 中文  ok"},
+		{"unicode preserved around lf", "unicode café \n ok", "unicode café  ok"},
 		{"u2028 replaced with space", "a" + ls + "b", "a b"},
 		{"u2029 replaced with space", "a" + ps + "b", "a b"},
 		{"u2028 and u2029 mixed", "x" + ls + "y" + ps + "z", "x y z"},
 		{"all vectors combined", "a\r\nb\tc\x00d" + ls + "e" + ps + "f", "abcd e f"},
 		{"mixed", "x\r\n\t\x00" + ls + ps + "y", "x  y"},
+		{"invalid utf-8 preserved", "a\xffb\xfec", "a\xffb\xfec"},
+		{"invalid utf-8 mixed with vectors", "a\xff\nb\xfe\tc", "a\xffb\xfec"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,7 +82,7 @@ func (c *memoryCore) Write(ent zapcore.Entry, fields []zapcore.Field) error {
 
 func (c *memoryCore) Sync() error { return nil }
 
-// TestWrappersSanitizeMessageAndFields is the anti-假绿 / mutation check for
+// TestWrappersSanitizeMessageAndFields is the anti-fake-pass / mutation check for
 // the wrapper wiring. It captures emitted entries through an in-memory zap core
 // and asserts both message and string-typed fields are sanitized.
 //

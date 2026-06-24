@@ -152,8 +152,8 @@ func newEncoderConfig() zapcore.EncoderConfig {
 		MessageKey:    "msg",
 		StacktraceKey: "stacktrace",
 		LineEnding:    zapcore.DefaultLineEnding,
-		EncodeLevel:   zapcore.LowercaseLevelEncoder, // 小写编码器
-		EncodeCaller:  zapcore.FullCallerEncoder,     // 全路径编码器
+		EncodeLevel:   zapcore.LowercaseLevelEncoder, // lowercase encoder
+		EncodeCaller:  zapcore.FullCallerEncoder,     // full-path encoder
 		EncodeName:    zapcore.FullNameEncoder,
 		EncodeTime: func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 			enc.AppendString(t.Format("2006-01-02 15:04:05"))
@@ -203,21 +203,36 @@ func Warn(msg string, fields ...zap.Field) {
 //
 // Other control characters (e.g. ESC, BEL) are left untouched — this function
 // targets log-injection vectors, not arbitrary terminal-escape sanitization.
+//
+// Invalid UTF-8 bytes are preserved verbatim — this function operates at the
+// byte level for the ASCII vectors and only inspects three-byte sequences when
+// checking for U+2028/U+2029, so diagnostic logs containing non-UTF-8 byte
+// sequences are not silently rewritten to U+FFFD.
 func SanitizeForLog(s string) string {
-	if !strings.ContainsAny(s, "\r\n\t\x00") && !strings.Contains(s, " ") && !strings.Contains(s, " ") {
+	if !strings.ContainsAny(s, "\r\n\t\x00") &&
+		!strings.Contains(s, "\u2028") &&
+		!strings.Contains(s, "\u2029") {
 		return s
 	}
 	var b strings.Builder
 	b.Grow(len(s))
-	for _, r := range s {
-		switch r {
-		case '\r', '\n', '\t', '\x00':
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		// Fast byte-level path for ASCII vectors.
+		if c == '\r' || c == '\n' || c == '\t' || c == 0x00 {
+			i++
 			continue
-		case ' ', ' ':
-			b.WriteByte(' ')
-		default:
-			b.WriteRune(r)
 		}
+		// U+2028 = 0xE2 0x80 0xA8, U+2029 = 0xE2 0x80 0xA9.
+		if c == 0xE2 && i+2 < len(s) && s[i+1] == 0x80 && (s[i+2] == 0xA8 || s[i+2] == 0xA9) {
+			b.WriteByte(' ')
+			i += 3
+			continue
+		}
+		// Everything else (including invalid UTF-8 bytes) preserved verbatim.
+		b.WriteByte(c)
+		i++
 	}
 	return b.String()
 }
@@ -258,7 +273,7 @@ type Log interface {
 
 // LIMLog TLog
 type TLog struct {
-	prefix string // 日志前缀
+	prefix string // log prefix
 }
 
 // NewLIMLog NewLIMLog
