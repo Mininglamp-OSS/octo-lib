@@ -86,23 +86,24 @@ func (c *memoryCore) Sync() error { return nil }
 // the wrapper wiring. It captures emitted entries through an in-memory zap core
 // and asserts both message and string-typed fields are sanitized.
 //
-// Mutation check: if you remove the SanitizeForLog call in Info/Debug/Error/Warn,
-// or the sanitizeFields call alongside it, this test must turn red. If you make
-// that change and this test stays green, the test is broken — fix the test, not
-// the production code.
+// Mutation canary: this test is the safety-net for the wrapper sanitization
+// wiring across ALL four package-level wrappers. The PR description promises
+// that removing SanitizeForLog from ANY of Info/Debug/Error/Warn must turn this
+// test red. An earlier version only exercised Info, leaving Debug/Error/Warn
+// silently uncovered (caught by reviewer 李飞飞 on PR #93). Do NOT collapse this
+// back to a single-wrapper test without re-proving the universal-coverage
+// property.
+//
+// Reproduction (for each wrapper W in {Info, Debug, Error, Warn}):
+//  1. Stub: replace `current().<W>Logger.<W>(SanitizeForLog(msg), sanitizeFields(fields)...)`
+//     with `current().<W>Logger.<W>(msg, fields...)` in pkg/log/logger.go
+//  2. Run: go test ./pkg/log/ -count=1 -run TestWrappersSanitizeMessageAndFields
+//  3. Must FAIL on subtest TestWrappersSanitizeMessageAndFields/W. If PASS, the
+//     canary for wrapper W is broken; fix the test BEFORE merging any change
+//     that touches the wrappers.
 func TestWrappersSanitizeMessageAndFields(t *testing.T) {
-	// Mutation check: this test is the canary for the wrapper sanitization wiring.
-	// If you remove the SanitizeForLog call from Info/Debug/Error/Warn (or from
-	// sanitizeFields), this test MUST turn red. If it stays green after such a
-	// removal, the test itself is broken and needs to be tightened. Do not weaken
-	// the assertions below without re-proving this property.
-	var captured atomic.Pointer[[]capturedEntry]
-	empty := []capturedEntry{}
-	captured.Store(&empty)
-	core := &memoryCore{LevelEnabler: zap.DebugLevel, entries: &captured}
-
-	// Swap in a logger backed by the memory core for the duration of this test.
-	// Restore whatever was published (or absent) afterwards.
+	// Save/restore the published logger set once around all subtests so the
+	// process-global state is restored after the table finishes.
 	prev := loggers.Load()
 	t.Cleanup(func() {
 		if prev == nil {
@@ -111,48 +112,68 @@ func TestWrappersSanitizeMessageAndFields(t *testing.T) {
 			loggers.Store(prev)
 		}
 	})
-	memLogger := zap.New(core)
-	loggers.Store(&loggerSet{
-		infoLogger:  memLogger,
-		errorLogger: memLogger,
-		warnLogger:  memLogger,
-		testLogger:  memLogger,
-	})
 
-	Info("msg with\nnewline", zap.String("k", "v\nwith\nnewlines"), zap.Int("n", 1))
+	wrappers := []struct {
+		name string
+		fn   func(string, ...zap.Field)
+	}{
+		{"Info", Info},
+		{"Debug", Debug},
+		{"Error", Error},
+		{"Warn", Warn},
+	}
+	for _, w := range wrappers {
+		t.Run(w.name, func(t *testing.T) {
+			// Fresh memoryCore + loggerSet per subtest so wrappers cannot
+			// contaminate each other's captured entries.
+			var captured atomic.Pointer[[]capturedEntry]
+			empty := []capturedEntry{}
+			captured.Store(&empty)
+			core := &memoryCore{LevelEnabler: zap.DebugLevel, entries: &captured}
+			memLogger := zap.New(core)
+			loggers.Store(&loggerSet{
+				infoLogger:  memLogger,
+				errorLogger: memLogger,
+				warnLogger:  memLogger,
+				testLogger:  memLogger,
+			})
 
-	got := captured.Load()
-	if len(*got) != 1 {
-		t.Fatalf("expected 1 captured entry, got %d", len(*got))
-	}
-	entry := (*got)[0]
-	if strings.ContainsAny(entry.msg, "\r\n\t") {
-		t.Errorf("msg not sanitized: %q", entry.msg)
-	}
-	if entry.msg != "msg withnewline" {
-		t.Errorf("unexpected sanitized msg: %q", entry.msg)
-	}
+			w.fn("msg with\nnewline", zap.String("k", "v\nwith\nnewlines"), zap.Int("n", 1))
 
-	var found bool
-	for _, f := range entry.fields {
-		if f.Key == "k" {
-			found = true
-			if f.Type != zapcore.StringType {
-				t.Errorf("field k unexpectedly non-string: %v", f.Type)
+			got := captured.Load()
+			if len(*got) != 1 {
+				t.Fatalf("wrapper %s: expected 1 captured entry, got %d", w.name, len(*got))
 			}
-			if strings.ContainsAny(f.String, "\r\n\t") {
-				t.Errorf("field k not sanitized: %q", f.String)
+			entry := (*got)[0]
+			if strings.ContainsAny(entry.msg, "\r\n\t") {
+				t.Errorf("wrapper %s: msg not sanitized: %q", w.name, entry.msg)
 			}
-			if f.String != "vwithnewlines" {
-				t.Errorf("unexpected sanitized field value: %q", f.String)
+			if entry.msg != "msg withnewline" {
+				t.Errorf("wrapper %s: unexpected sanitized msg: %q", w.name, entry.msg)
 			}
-		}
-		if f.Key == "n" && f.Integer != 1 {
-			t.Errorf("non-string field n mutated: %d", f.Integer)
-		}
-	}
-	if !found {
-		t.Fatal("did not see field k in captured entry")
+
+			var found bool
+			for _, f := range entry.fields {
+				if f.Key == "k" {
+					found = true
+					if f.Type != zapcore.StringType {
+						t.Errorf("wrapper %s: field k unexpectedly non-string: %v", w.name, f.Type)
+					}
+					if strings.ContainsAny(f.String, "\r\n\t") {
+						t.Errorf("wrapper %s: field k not sanitized: %q", w.name, f.String)
+					}
+					if f.String != "vwithnewlines" {
+						t.Errorf("wrapper %s: unexpected sanitized field value: %q", w.name, f.String)
+					}
+				}
+				if f.Key == "n" && f.Integer != 1 {
+					t.Errorf("wrapper %s: non-string field n mutated: %d", w.name, f.Integer)
+				}
+			}
+			if !found {
+				t.Errorf("wrapper %s: expected field k not found", w.name)
+			}
+		})
 	}
 }
 
