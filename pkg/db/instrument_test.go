@@ -6,8 +6,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/gocraft/dbr/v2"
 )
 
 // capturedDB 记录 observer 收到的一次调用。
@@ -30,34 +28,66 @@ func installDBObserver(t *testing.T) *capturedDB {
 	return c
 }
 
-func TestMetricEventReceiverTimingReportsQuery(t *testing.T) {
-	c := installDBObserver(t)
-	r := metricEventReceiver{&dbr.NullEventReceiver{}}
+// stubConn 实现 driver.Conn + ExecerContext/QueryerContext,用于测 instrumentedConn。
+type stubConn struct {
+	execErr  error
+	queryErr error
+}
 
-	r.Timing("dbr.select", int64(5*time.Millisecond))
-	if c.n != 1 || c.op != "query" || c.err != nil || c.dur != 5*time.Millisecond {
-		t.Fatalf("Timing: got op=%q dur=%v err=%v n=%d", c.op, c.dur, c.err, c.n)
+func (stubConn) Prepare(string) (driver.Stmt, error) { return nil, nil }
+func (stubConn) Close() error                        { return nil }
+func (stubConn) Begin() (driver.Tx, error)           { return nil, nil }
+func (c stubConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return nil, c.execErr
+}
+func (c stubConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	return nil, c.queryErr
+}
+
+func TestInstrumentedConnReportsQuerySuccess(t *testing.T) {
+	c := installDBObserver(t)
+	ic := instrumentedConn{stubConn{}}
+
+	if _, err := ic.ExecContext(context.Background(), "update x", nil); err != nil {
+		t.Fatalf("ExecContext: %v", err)
+	}
+	if c.n != 1 || c.op != "query" || c.err != nil {
+		t.Fatalf("exec: got op=%q err=%v n=%d", c.op, c.err, c.n)
 	}
 
-	r.TimingKv("dbr.exec", int64(7*time.Millisecond), map[string]string{"sql": "update x"})
-	if c.n != 2 || c.op != "query" || c.err != nil || c.dur != 7*time.Millisecond {
-		t.Fatalf("TimingKv: got op=%q dur=%v err=%v n=%d", c.op, c.dur, c.err, c.n)
+	if _, err := ic.QueryContext(context.Background(), "select 1", nil); err != nil {
+		t.Fatalf("QueryContext: %v", err)
+	}
+	if c.n != 2 || c.op != "query" || c.err != nil {
+		t.Fatalf("query: got op=%q err=%v n=%d", c.op, c.err, c.n)
 	}
 }
 
-// errEvents 断言失败路径只走 Event*（no-op，不上报），不产生 query 样本 ——
-// 印证「失败查询不会在 Timing 之外被二次上报」的设计。
-func TestMetricEventReceiverErrorPathDoesNotReport(t *testing.T) {
+// 驱动层拿得到真实执行错误,故 op="query" 现在携带 error 状态(对比旧 dbr.Timing 路径)。
+func TestInstrumentedConnReportsQueryError(t *testing.T) {
 	c := installDBObserver(t)
-	r := metricEventReceiver{&dbr.NullEventReceiver{}}
+	boom := errors.New("syntax error")
+	ic := instrumentedConn{stubConn{execErr: boom}}
 
-	sentinel := errors.New("boom")
-	if got := r.EventErrKv("dbr.exec.exec", sentinel, nil); got != sentinel {
-		t.Fatalf("EventErrKv should passthrough err, got %v", got)
+	_, err := ic.ExecContext(context.Background(), "bad sql", nil)
+	if !errors.Is(err, boom) {
+		t.Fatalf("err should propagate, got %v", err)
 	}
-	r.Event("dbr.begin")
+	if c.n != 1 || c.op != "query" || !errors.Is(c.err, boom) {
+		t.Fatalf("failed query must report with err: op=%q err=%v n=%d", c.op, c.err, c.n)
+	}
+}
+
+// driver.ErrSkip 是「退回 Prepare 路径」的信号,不是真实执行,不应计样本。
+func TestInstrumentedConnExecErrSkipNotReported(t *testing.T) {
+	c := installDBObserver(t)
+	ic := instrumentedConn{stubConn{execErr: driver.ErrSkip}}
+
+	if _, err := ic.ExecContext(context.Background(), "x", nil); err != driver.ErrSkip {
+		t.Fatalf("ErrSkip should propagate, got %v", err)
+	}
 	if c.n != 0 {
-		t.Fatalf("error/event path must not report, got n=%d", c.n)
+		t.Fatalf("ErrSkip must not be reported as a query sample, got n=%d", c.n)
 	}
 }
 

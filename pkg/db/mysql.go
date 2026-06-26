@@ -19,7 +19,12 @@ import (
 // 不再走 dbr.Open（内部 sql.Open + 默认 driver），而是手动用
 // sql.OpenDB(instrumentedConnector{...}) 打开，并手搭 *dbr.Connection。这样：
 //   - 建连握手经 instrumentedConnector.Connect 计时（op="connect"）；
-//   - 每条查询经 metricEventReceiver 计时（op="query"）。
+//   - 拿到连接之后每条语句的纯执行经 instrumentedConn 计时（op="query"）。
+//
+// 计时落在驱动层(connect 在建连处、query 在连接已取得之后),所以「建连握手 / 取连接
+// 等待 / 执行」三段不重叠;取连接等待由连接池的 WaitDuration 体现。dbr 自身的
+// EventReceiver 不再用于打点(用 NullEventReceiver 兜底,dbr 的 Timing 含取连接等待,
+// 量的不是纯执行)。
 //
 // 池参数（MaxOpenConns/MaxIdleConns/ConnMaxLifetime）与迁移行为保持不变。
 // 注：ConnMaxLifetime 建议设为小于 MySQL 服务端 wait_timeout（默认 28800s），
@@ -38,7 +43,7 @@ func NewMySQL(addr string, maxOpenConns int, maxIdleConns int, connMaxLifetime t
 	conn := &dbr.Connection{
 		DB:            sqlDB,
 		Dialect:       dialect.MySQL,
-		EventReceiver: metricEventReceiver{&dbr.NullEventReceiver{}},
+		EventReceiver: &dbr.NullEventReceiver{},
 	}
 
 	session := conn.NewSession(nil)
