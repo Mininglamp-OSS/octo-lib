@@ -23,6 +23,7 @@ func TestNormalizeRedisErr(t *testing.T) {
 }
 
 func TestReportRedisNoObserverIsNoop(t *testing.T) {
+	t.Cleanup(func() { SetRedisObserver(nil) })
 	SetRedisObserver(nil)
 	reportRedis("get", time.Millisecond, nil) // 不得 panic
 }

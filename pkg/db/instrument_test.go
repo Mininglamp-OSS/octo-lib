@@ -129,6 +129,7 @@ func TestInstrumentedConnectorReportsConnectError(t *testing.T) {
 
 // 未注入 observer 时上报必须是安全 no-op。
 func TestReportDBNoObserverIsNoop(t *testing.T) {
+	t.Cleanup(func() { SetDBObserver(nil) })
 	SetDBObserver(nil)
 	reportDB("query", time.Millisecond, nil) // 不得 panic
 }
