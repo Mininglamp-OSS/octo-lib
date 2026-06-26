@@ -1,27 +1,45 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql" // mysql
+	"github.com/go-sql-driver/mysql"
 	"github.com/gocraft/dbr/v2"
+	"github.com/gocraft/dbr/v2/dialect"
 	migrate "github.com/rubenv/sql-migrate"
 )
 
 // NewMySQL 创建一个MySQL db，[path]db存储路径 [sqlDir]sql脚本目录
+//
+// 不再走 dbr.Open（内部 sql.Open + 默认 driver），而是手动用
+// sql.OpenDB(instrumentedConnector{...}) 打开，并手搭 *dbr.Connection。这样：
+//   - 建连握手经 instrumentedConnector.Connect 计时（op="connect"）；
+//   - 每条查询经 metricEventReceiver 计时（op="query"）。
+//
+// 池参数（MaxOpenConns/MaxIdleConns/ConnMaxLifetime）与迁移行为保持不变。
+// 注：ConnMaxLifetime 建议设为小于 MySQL 服务端 wait_timeout（默认 28800s），
+// 以免使用到被服务端单方面关闭的陈旧连接。
 func NewMySQL(addr string, maxOpenConns int, maxIdleConns int, connMaxLifetime time.Duration) *dbr.Session {
 
-	conn, err := dbr.Open("mysql", addr, nil)
+	base, err := mysql.MySQLDriver{}.OpenConnector(addr)
 	if err != nil {
 		panic(err)
 	}
-	conn.SetMaxOpenConns(maxOpenConns)
-	conn.SetMaxIdleConns(maxIdleConns)
-	conn.SetConnMaxLifetime(connMaxLifetime) //mysql 默认超时时间为 60*60*8=28800 SetConnMaxLifetime设置为小于数据库超时时间即可
+	sqlDB := sql.OpenDB(instrumentedConnector{Connector: base})
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxIdleConns)
+	sqlDB.SetConnMaxLifetime(connMaxLifetime) //mysql 默认超时时间为 60*60*8=28800 SetConnMaxLifetime设置为小于数据库超时时间即可
+
+	conn := &dbr.Connection{
+		DB:            sqlDB,
+		Dialect:       dialect.MySQL,
+		EventReceiver: metricEventReceiver{&dbr.NullEventReceiver{}},
+	}
 
 	session := conn.NewSession(nil)
 

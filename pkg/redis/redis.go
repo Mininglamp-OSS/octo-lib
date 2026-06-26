@@ -27,6 +27,7 @@ func New(addr string, password string) *Conn {
 		MaxRetries: 3, // 失败重试次数
 		Password:   password,
 	})
+	instrumentClient(c.client)
 	return c
 }
 
@@ -44,7 +45,9 @@ func NewWithOptions(opts *rd.Options) *Conn {
 	if local.MaxRetries == 0 {
 		local.MaxRetries = 3
 	}
-	return &Conn{client: rd.NewClient(&local)}
+	client := rd.NewClient(&local)
+	instrumentClient(client)
+	return &Conn{client: client}
 }
 
 // Options returns the underlying go-redis client options. Intended for tests
