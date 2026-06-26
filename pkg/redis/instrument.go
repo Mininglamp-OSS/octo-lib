@@ -35,7 +35,11 @@ func SetRedisObserver(o RedisObserver) {
 }
 
 // reportRedis 把一次命令转发给已注入的 observer；未注入时为 no-op。
+//
+// 在接缝处兜住下游 observer 的 panic:observer 跑在每条命令的热路径上,一个
+// nil-deref 不该顺着 Redis 调用炸上来,最多丢掉这一条埋点样本。
 func reportRedis(cmd string, dur time.Duration, err error) {
+	defer func() { _ = recover() }()
 	if p := redisObserver.Load(); p != nil {
 		(*p)(cmd, dur, err)
 	}
@@ -63,7 +67,7 @@ func instrumentClient(client *rd.Client) {
 		return func(cmds []rd.Cmder) error {
 			start := time.Now()
 			err := old(cmds)
-			reportRedis("pipeline", time.Since(start), normalizeRedisErr(err))
+			reportRedis("pipeline", time.Since(start), pipelineErr(cmds, err))
 			return err
 		}
 	})
@@ -75,4 +79,18 @@ func normalizeRedisErr(err error) error {
 		return nil
 	}
 	return err
+}
+
+// pipelineErr 提炼一个 pipeline 批次里「真正的」错误用于打点。go-redis v6 的
+// pipeline 顶层错误是 cmdsFirstErr —— 按顺序取第一条命令的错误,因此一个打头的
+// redis.Nil（例如对不存在 key 的 GET）会把后面命令的真实失败盖住,导致整批被记成
+// 成功。这里扫描各命令,返回第一条非 redis.Nil 的命令错误;若只有 redis.Nil / 无
+// 命令错误,再回落到归一化后的顶层错误。
+func pipelineErr(cmds []rd.Cmder, topErr error) error {
+	for _, cmd := range cmds {
+		if e := cmd.Err(); e != nil && e != rd.Nil {
+			return e
+		}
+	}
+	return normalizeRedisErr(topErr)
 }

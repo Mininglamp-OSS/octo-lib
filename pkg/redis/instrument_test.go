@@ -27,6 +27,31 @@ func TestReportRedisNoObserverIsNoop(t *testing.T) {
 	reportRedis("get", time.Millisecond, nil) // 不得 panic
 }
 
+// 下游 observer panic 必须被接缝兜住,不得顺着 Redis 调用炸上来。
+func TestReportRedisRecoversFromObserverPanic(t *testing.T) {
+	SetRedisObserver(func(string, time.Duration, error) { panic("boom") })
+	t.Cleanup(func() { SetRedisObserver(nil) })
+	reportRedis("get", time.Millisecond, nil) // 不得 panic
+}
+
+// pipelineErr 的可单测分支:无命令错误时回落到归一化顶层错误。
+// (「打头 redis.Nil 盖住后续真实错误」分支需要给命令预置错误,而 go-redis v6
+// 未导出 setErr,无法在外部包构造,留给集成路径覆盖。)
+func TestPipelineErrFallsBackToTopErr(t *testing.T) {
+	okCmd := rd.NewStringCmd("get", "k") // Err()==nil
+
+	if got := pipelineErr([]rd.Cmder{okCmd}, nil); got != nil {
+		t.Fatalf("no errors → nil, got %v", got)
+	}
+	if got := pipelineErr([]rd.Cmder{okCmd}, rd.Nil); got != nil {
+		t.Fatalf("top redis.Nil must normalize to nil, got %v", got)
+	}
+	boom := os.ErrClosed
+	if got := pipelineErr([]rd.Cmder{okCmd}, boom); got != boom {
+		t.Fatalf("real top err must pass through, got %v", got)
+	}
+}
+
 func TestSetRedisObserverRoundTrip(t *testing.T) {
 	var (
 		mu  sync.Mutex

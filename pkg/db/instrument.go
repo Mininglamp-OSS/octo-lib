@@ -37,7 +37,12 @@ func SetDBObserver(o DBObserver) {
 }
 
 // reportDB 把一次调用转发给已注入的 observer；未注入时为 no-op。
+//
+// 在接缝处兜住下游 observer 的 panic:observer 跑在每条 DB 调用的热路径上,一个
+// nil-deref 不该顺着所有查询炸上来,最多丢掉这一条埋点样本。godoc 已要求实现方
+// "不 panic",这里再加一道防线而非纯靠信任。
 func reportDB(op string, dur time.Duration, err error) {
+	defer func() { _ = recover() }()
 	if p := dbObserver.Load(); p != nil {
 		(*p)(op, dur, err)
 	}

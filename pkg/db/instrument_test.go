@@ -103,6 +103,13 @@ func TestReportDBNoObserverIsNoop(t *testing.T) {
 	reportDB("query", time.Millisecond, nil) // 不得 panic
 }
 
+// 下游 observer panic 必须被接缝兜住,不得顺着 DB 调用炸上来。
+func TestReportDBRecoversFromObserverPanic(t *testing.T) {
+	SetDBObserver(func(string, time.Duration, error) { panic("boom") })
+	t.Cleanup(func() { SetDBObserver(nil) })
+	reportDB("query", time.Millisecond, nil) // 不得 panic
+}
+
 // NewMySQL 不应在构造时建连（sql.OpenDB 是惰性的），故无需真实 DB 即可构造成功。
 func TestNewMySQLConstructsWithoutConnecting(t *testing.T) {
 	sess := NewMySQL("user:pass@tcp(127.0.0.1:3306)/db?parseTime=true", 10, 5, time.Hour)
