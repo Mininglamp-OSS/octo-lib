@@ -107,14 +107,16 @@ func Instrument(client *rd.Client) {
 	if client == nil {
 		return
 	}
+	// 全程持锁:把 WrapProcess 的安装也纳入临界区。否则并发 Instrument(同一 client)时,
+	// 第二个 goroutine 可能在第一个尚未装完 hook 时就看到「已登记」而返回,其调用方随即
+	// 发命令 —— 与 go-redis v6 未加锁的 WrapProcess 赋值并发即数据竞争。WrapProcess 只是
+	// 字段赋值、且仅启动期调用,持锁开销可忽略。
 	instrumentedMu.Lock()
+	defer instrumentedMu.Unlock()
 	if _, ok := instrumented[client]; ok {
-		instrumentedMu.Unlock()
 		return
 	}
 	instrumented[client] = struct{}{}
-	instrumentedMu.Unlock()
-
 	wrapClient(client)
 }
 
