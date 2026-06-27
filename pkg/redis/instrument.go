@@ -89,8 +89,10 @@ func wrapClient(client *rd.Client) {
 // 因而绕过了 New/NewWithOptions 的自动插桩。调用方在构造后调一次本函数即可纳入
 // dependency=redis 指标。
 //
-// 时机:必须在 client 被共享 / 发起命令**之前**调用。go-redis v6 的 WrapProcess 赋值
-// 未加锁,与在途命令并发会 race。
+// 时机:必须在 client 被共享 / 发起命令 / 被 WithContext 克隆**之前**调用。go-redis v6
+// 的 WrapProcess 赋值未加锁,与在途命令并发会 race;且 client.WithContext(ctx) 返回的是
+// 克隆,克隆时即固化当时的 process —— 先克隆、后对原 client 调 Instrument,克隆不会继承
+// 本 hook。需要被观测的克隆,应对其本身调用 Instrument,或在克隆前就插桩好原 client。
 //
 // 幂等且 nil-safe:client 为 nil 时直接返回;对同一 client 重复调用是 no-op,不会层叠
 // hook、不会重复计数。注意它会在内部表里持有该 client 的引用(见 instrumented),故面向
