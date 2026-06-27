@@ -167,6 +167,22 @@ func TestNewClientInstrumentedReportsCommands(t *testing.T) {
 	}
 }
 
+// New/NewWithOptions 走内部 wrapClient,不应把自家 client 登记进全局幂等表 —— 否则
+// 短生命周期的 New() client 会被钉住不回收(Jerry-Xin review)。非集成,CI 可跑。
+func TestNewDoesNotRetainInGuardMap(t *testing.T) {
+	count := func() int {
+		instrumentedMu.Lock()
+		defer instrumentedMu.Unlock()
+		return len(instrumented)
+	}
+	before := count()
+	conn := NewWithOptions(&rd.Options{Addr: "127.0.0.1:1"}) // 惰性,不会真正连接
+	defer func() { _ = conn.Close() }()
+	if after := count(); after != before {
+		t.Fatalf("New/NewWithOptions must not register clients in the idempotence map: len %d -> %d", before, after)
+	}
+}
+
 // 集成路径：验证导出的 Instrument 能给「裸」*rd.Client 补插桩 —— 即不经
 // New/NewWithOptions、需要 Eval/SetNX 等原语而直接构造的客户端(限流/锁/health)。
 // 同时验证幂等：连调两次 Instrument,一条 GET 只应产生一条样本（无 hook 层叠/重复计数）。

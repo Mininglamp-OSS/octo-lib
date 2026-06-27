@@ -46,17 +46,40 @@ func reportRedis(cmd string, dur time.Duration, err error) {
 	}
 }
 
-// instrumented 标记已挂过 hook 的 client,使 Instrument 幂等:重复调用是 no-op。
-// go-redis v6 的 WrapProcess 每调一次就在上一层外再包一层,没有这道 guard,对同一
-// client 调两次(或对 New/NewWithOptions 构造的 client 再手动调一次)会让每条命令
-// 重复计数 2×,且无运行期信号 —— ~15 个裸 client 调用方场景下极易误触。
+// instrumented 标记已经过 Instrument(公开入口)挂过 hook 的 client,使其幂等:
+// 重复调用是 no-op。go-redis v6 的 WrapProcess 每调一次就在上一层外再包一层,没有
+// 这道 guard,对同一 client 调两次会让每条命令重复计数 2×,且无运行期信号 —— ~15 个
+// 裸 client 调用方场景下极易误触。
 //
-// 代价:map 持有 client 指针,会钉住已插桩的 client 不被 GC。本函数面向「长生命周期」
-// 客户端(启动期单例),不要在热循环里对临时 client 反复调用。
+// 仅公开的 Instrument 登记此表;New/NewWithOptions 走内部 wrapClient,不登记 —— 它们
+// 对刚构造、必然只插一次的 client 操作,无重复风险,也就不必把(可能短生命周期的)
+// New 构造 client 钉在表里不被 GC。所以本表只持有调用方显式传入的长生命周期裸 client。
 var (
 	instrumentedMu sync.Mutex
 	instrumented   = map[*rd.Client]struct{}{}
 )
+
+// wrapClient 把每条命令的计时 hook 挂到 client 上(WrapProcess/WrapProcessPipeline)。
+// 这是内部低层实现,不做 nil / 幂等 guard —— 供 New/NewWithOptions 对自家刚构造的
+// client 调用。公开的 Instrument 在其之上叠加 nil + 幂等 guard。
+func wrapClient(client *rd.Client) {
+	client.WrapProcess(func(old func(rd.Cmder) error) func(rd.Cmder) error {
+		return func(cmd rd.Cmder) error {
+			start := time.Now()
+			err := old(cmd)
+			reportRedis(cmd.Name(), time.Since(start), normalizeRedisErr(err))
+			return err
+		}
+	})
+	client.WrapProcessPipeline(func(old func([]rd.Cmder) error) func([]rd.Cmder) error {
+		return func(cmds []rd.Cmder) error {
+			start := time.Now()
+			err := old(cmds)
+			reportRedis("pipeline", time.Since(start), pipelineErr(cmds, err))
+			return err
+		}
+	})
+}
 
 // Instrument 给一个 go-redis v6 的 *rd.Client 挂上每条命令的计时 hook,使其命令也灌入
 // 已注册的 RedisObserver —— 与经 New/NewWithOptions 构造的客户端完全一致。
@@ -66,8 +89,12 @@ var (
 // 因而绕过了 New/NewWithOptions 的自动插桩。调用方在构造后调一次本函数即可纳入
 // dependency=redis 指标。
 //
-// 幂等且 nil-safe:client 为 nil 时直接返回;对同一 client 重复调用(或对
-// New/NewWithOptions 已自动插桩的 client 再调)是 no-op,不会层叠 hook、不会重复计数。
+// 时机:必须在 client 被共享 / 发起命令**之前**调用。go-redis v6 的 WrapProcess 赋值
+// 未加锁,与在途命令并发会 race。
+//
+// 幂等且 nil-safe:client 为 nil 时直接返回;对同一 client 重复调用是 no-op,不会层叠
+// hook、不会重复计数。注意它会在内部表里持有该 client 的引用(见 instrumented),故面向
+// 长生命周期客户端(启动期单例),不要在热循环里对临时 client 反复调用。
 //
 // 计时细节:
 //   - 单条命令：op = cmd.Name()；
@@ -88,22 +115,7 @@ func Instrument(client *rd.Client) {
 	instrumented[client] = struct{}{}
 	instrumentedMu.Unlock()
 
-	client.WrapProcess(func(old func(rd.Cmder) error) func(rd.Cmder) error {
-		return func(cmd rd.Cmder) error {
-			start := time.Now()
-			err := old(cmd)
-			reportRedis(cmd.Name(), time.Since(start), normalizeRedisErr(err))
-			return err
-		}
-	})
-	client.WrapProcessPipeline(func(old func([]rd.Cmder) error) func([]rd.Cmder) error {
-		return func(cmds []rd.Cmder) error {
-			start := time.Now()
-			err := old(cmds)
-			reportRedis("pipeline", time.Since(start), pipelineErr(cmds, err))
-			return err
-		}
-	})
+	wrapClient(client)
 }
 
 // normalizeRedisErr 把 redis.Nil 归一为 nil（未命中不是故障），其余原样返回。
