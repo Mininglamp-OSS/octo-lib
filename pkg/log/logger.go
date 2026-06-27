@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -166,24 +167,49 @@ func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 	enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
 }
 
+// SanitizeForLog strips \r, \n, and \t from a string to prevent log injection.
+// Safe to call on any user-derived input before passing it as a zap field value
+// or log message.
+func SanitizeForLog(s string) string {
+	if s == "" {
+		return s
+	}
+	if !strings.ContainsAny(s, "\r\n\t") {
+		return s
+	}
+	return strings.NewReplacer("\r", "\\r", "\n", "\\n", "\t", "\\t").Replace(s)
+}
+
+// sanitizeFields returns a copy of fields with all String-type values sanitized.
+func sanitizeFields(fields []zap.Field) []zap.Field {
+	out := make([]zap.Field, len(fields))
+	for i, f := range fields {
+		if f.Type == zapcore.StringType {
+			f.String = SanitizeForLog(f.String)
+		}
+		out[i] = f
+	}
+	return out
+}
+
 // Info Info
 func Info(msg string, fields ...zap.Field) {
-	current().infoLogger.Info(msg, fields...)
+	current().infoLogger.Info(SanitizeForLog(msg), sanitizeFields(fields)...)
 }
 
 // Debug Debug
 func Debug(msg string, fields ...zap.Field) {
-	current().infoLogger.Debug(msg, fields...)
+	current().infoLogger.Debug(SanitizeForLog(msg), sanitizeFields(fields)...)
 }
 
 // Error Error
 func Error(msg string, fields ...zap.Field) {
-	current().errorLogger.Error(msg, fields...)
+	current().errorLogger.Error(SanitizeForLog(msg), sanitizeFields(fields)...)
 }
 
 // Warn Warn
 func Warn(msg string, fields ...zap.Field) {
-	current().warnLogger.Warn(msg, fields...)
+	current().warnLogger.Warn(SanitizeForLog(msg), sanitizeFields(fields)...)
 }
 
 // Log Log
