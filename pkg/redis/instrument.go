@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,6 +46,18 @@ func reportRedis(cmd string, dur time.Duration, err error) {
 	}
 }
 
+// instrumented 标记已挂过 hook 的 client,使 Instrument 幂等:重复调用是 no-op。
+// go-redis v6 的 WrapProcess 每调一次就在上一层外再包一层,没有这道 guard,对同一
+// client 调两次(或对 New/NewWithOptions 构造的 client 再手动调一次)会让每条命令
+// 重复计数 2×,且无运行期信号 —— ~15 个裸 client 调用方场景下极易误触。
+//
+// 代价:map 持有 client 指针,会钉住已插桩的 client 不被 GC。本函数面向「长生命周期」
+// 客户端(启动期单例),不要在热循环里对临时 client 反复调用。
+var (
+	instrumentedMu sync.Mutex
+	instrumented   = map[*rd.Client]struct{}{}
+)
+
 // Instrument 给一个 go-redis v6 的 *rd.Client 挂上每条命令的计时 hook,使其命令也灌入
 // 已注册的 RedisObserver —— 与经 New/NewWithOptions 构造的客户端完全一致。
 //
@@ -53,8 +66,8 @@ func reportRedis(cmd string, dur time.Duration, err error) {
 // 因而绕过了 New/NewWithOptions 的自动插桩。调用方在构造后调一次本函数即可纳入
 // dependency=redis 指标。
 //
-// 注意:New/NewWithOptions 已经调过 Instrument,**不要**对 Conn 构造出来的 client 再调;
-// hook 会在重复调用时层叠(导致重复计数)。故每个 client 只在构造后、共享前调用一次。
+// 幂等且 nil-safe:client 为 nil 时直接返回;对同一 client 重复调用(或对
+// New/NewWithOptions 已自动插桩的 client 再调)是 no-op,不会层叠 hook、不会重复计数。
 //
 // 计时细节:
 //   - 单条命令：op = cmd.Name()；
@@ -64,6 +77,17 @@ func reportRedis(cmd string, dur time.Duration, err error) {
 // redis.Nil（key 不存在 / 无匹配）是正常的「未命中」语义而非故障，归一为非错误，
 // 避免把命中率噪声混进 error 状态。WrapProcess 只观测、不改变返回给调用方的 err。
 func Instrument(client *rd.Client) {
+	if client == nil {
+		return
+	}
+	instrumentedMu.Lock()
+	if _, ok := instrumented[client]; ok {
+		instrumentedMu.Unlock()
+		return
+	}
+	instrumented[client] = struct{}{}
+	instrumentedMu.Unlock()
+
 	client.WrapProcess(func(old func(rd.Cmder) error) func(rd.Cmder) error {
 		return func(cmd rd.Cmder) error {
 			start := time.Now()
