@@ -122,3 +122,41 @@ func TestInstrumentClientReportsCommands(t *testing.T) {
 		t.Fatalf("expected a 'get' sample, got %+v", samples)
 	}
 }
+
+// 集成路径：验证导出的 Instrument 能给「裸」*rd.Client 补插桩 —— 即不经
+// New/NewWithOptions、需要 Eval/SetNX 等原语而直接构造的客户端(限流/锁/health)。
+// 需要真实 Redis。
+func TestInstrumentRawClientReportsCommands(t *testing.T) {
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		t.Skip("REDIS_ADDR not set, skipping integration test")
+	}
+
+	var (
+		mu     sync.Mutex
+		sawGet bool
+	)
+	SetRedisObserver(func(cmd string, _ time.Duration, _ error) {
+		mu.Lock()
+		if cmd == "get" {
+			sawGet = true
+		}
+		mu.Unlock()
+	})
+	t.Cleanup(func() { SetRedisObserver(nil) })
+
+	// 裸客户端,不经 New/NewWithOptions,手动 Instrument。
+	client := rd.NewClient(&rd.Options{Addr: addr, Password: os.Getenv("REDIS_PASSWORD")})
+	defer func() { _ = client.Close() }()
+	Instrument(client)
+
+	if err := client.Get("test:instrument:raw:missing").Err(); err != nil && err != rd.Nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !sawGet {
+		t.Fatal("expected a 'get' sample from the manually-instrumented raw client")
+	}
+}

@@ -23,9 +23,9 @@ var redisObserver atomic.Pointer[RedisObserver]
 // SetRedisObserver 注入进程级 Redis observer。传 nil 可清除（恢复 no-op）。
 // 通常在 main 启动早期调用一次。
 //
-// 注意：observer 是进程级单例。SetRedisObserver 影响之后经 instrumentClient 计时
-// 的所有 client 的上报目标；instrumentClient 自身在 New/NewWithOptions 构造时即已
-// 挂好 hook，与 observer 是否注入无关。
+// 注意：observer 是进程级单例。SetRedisObserver 影响之后经 Instrument 计时的所有
+// client 的上报目标；Instrument 自身在 New/NewWithOptions 构造时（或裸 client 手动
+// 调用时）即已挂好 hook，与 observer 是否注入无关。
 func SetRedisObserver(o RedisObserver) {
 	if o == nil {
 		redisObserver.Store(nil)
@@ -45,16 +45,25 @@ func reportRedis(cmd string, dur time.Duration, err error) {
 	}
 }
 
-// instrumentClient 用 go-redis v6 的 WrapProcess/WrapProcessPipeline 给每条命令计时。
-// go-redis v6 没有 v8 的 AddHook，WrapProcess 是其等价物（包裹 process 函数）。
+// Instrument 给一个 go-redis v6 的 *rd.Client 挂上每条命令的计时 hook,使其命令也灌入
+// 已注册的 RedisObserver —— 与经 New/NewWithOptions 构造的客户端完全一致。
 //
+// 用途:为**直接用 rd.NewClient 构造的裸客户端**补插桩 —— 它们往往需要 Eval/Script/
+// SetNX 等 pkg/redis 的 Conn 包装未暴露的原语(如限流令牌桶、OIDC 锁、health 探针),
+// 因而绕过了 New/NewWithOptions 的自动插桩。调用方在构造后调一次本函数即可纳入
+// dependency=redis 指标。
+//
+// 注意:New/NewWithOptions 已经调过 Instrument,**不要**对 Conn 构造出来的 client 再调;
+// hook 会在重复调用时层叠(导致重复计数)。故每个 client 只在构造后、共享前调用一次。
+//
+// 计时细节:
 //   - 单条命令：op = cmd.Name()；
 //   - pipeline：作为一次往返整体上报 op = "pipeline"（管道内多命令共享一次 RTT，
 //     无法拆分单命令耗时）。
 //
 // redis.Nil（key 不存在 / 无匹配）是正常的「未命中」语义而非故障，归一为非错误，
 // 避免把命中率噪声混进 error 状态。WrapProcess 只观测、不改变返回给调用方的 err。
-func instrumentClient(client *rd.Client) {
+func Instrument(client *rd.Client) {
 	client.WrapProcess(func(old func(rd.Cmder) error) func(rd.Cmder) error {
 		return func(cmd rd.Cmder) error {
 			start := time.Now()

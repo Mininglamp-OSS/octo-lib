@@ -27,7 +27,7 @@ func New(addr string, password string) *Conn {
 		MaxRetries: 3, // 失败重试次数
 		Password:   password,
 	})
-	instrumentClient(c.client)
+	Instrument(c.client)
 	return c
 }
 
@@ -46,7 +46,7 @@ func NewWithOptions(opts *rd.Options) *Conn {
 		local.MaxRetries = 3
 	}
 	client := rd.NewClient(&local)
-	instrumentClient(client)
+	Instrument(client)
 	return &Conn{client: client}
 }
 
