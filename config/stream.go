@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 
-	"github.com/Mininglamp-OSS/octo-lib/pkg/network"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/util"
 )
 
@@ -11,7 +10,7 @@ import (
 // 返回流编号
 func (c *Context) IMStreamStart(req MessageStreamStartReq) (string, error) {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/streammessage/start", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opStreamStart, "/streammessage/start", []byte(util.ToJson(req)))
 	if err != nil {
 		return "", err
 	}
@@ -35,7 +34,7 @@ func (c *Context) IMStreamStart(req MessageStreamStartReq) (string, error) {
 }
 
 func (c *Context) IMStreamEnd(req MessageStreamEndReq) error {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/streammessage/end", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opStreamEnd, "/streammessage/end", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/Mininglamp-OSS/octo-lib/common"
-	"github.com/Mininglamp-OSS/octo-lib/pkg/network"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/util"
 	"github.com/sendgrid/rest"
 	"github.com/tidwall/gjson"
@@ -68,12 +67,12 @@ type UpdateIMTokenResp struct {
 
 // UpdateIMToken 更新IM的token
 func (c *Context) UpdateIMToken(req UpdateIMTokenReq) (*UpdateIMTokenResp, error) {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/user/token", []byte(util.ToJson(map[string]interface{}{
+	resp, err := c.imPost(opUpdateUserToken, "/user/token", []byte(util.ToJson(map[string]interface{}{
 		"uid":          req.UID,
 		"token":        req.Token,
 		"device_level": req.DeviceLevel,
 		"device_flag":  req.DeviceFlag,
-	})), c.wkIMManagerTokenHeader())
+	})))
 	if err != nil {
 		return nil, err
 	}
@@ -90,10 +89,10 @@ func (c *Context) UpdateIMToken(req UpdateIMTokenReq) (*UpdateIMTokenResp, error
 
 // 退出用户指定的设备 deviceFlag -1 表示退出用户所有的设备
 func (c *Context) QuitUserDevice(uid string, deviceFlag int) error {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/user/device_quit", []byte(util.ToJson(map[string]interface{}{
+	resp, err := c.imPost(opQuitUserDevice, "/user/device_quit", []byte(util.ToJson(map[string]interface{}{
 		"uid":         uid,
 		"device_flag": deviceFlag,
-	})), c.wkIMManagerTokenHeader())
+	})))
 	if err != nil {
 		return err
 	}
@@ -106,7 +105,7 @@ func (c *Context) QuitUserDevice(uid string, deviceFlag int) error {
 
 // SendMessageBatch 给一批用户发送消息
 func (c *Context) SendMessageBatch(req *MsgSendBatch) error {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/message/sendbatch", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSendMessageBatch, "/message/sendbatch", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -134,7 +133,7 @@ func (c *Context) SendMessage(req *MsgSendReq) error {
 
 // SendMessage 发送消息
 func (c *Context) SendMessageWithResult(req *MsgSendReq) (*MsgSendResp, error) {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/message/send", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSendMessage, "/message/send", []byte(util.ToJson(req)))
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +217,7 @@ func (c *Context) SendFriendDelete(req *MsgFriendDeleteReq) error {
 
 // IMCreateOrUpdateChannelInfo 修改或创建channel信息
 func (c *Context) IMCreateOrUpdateChannelInfo(req *ChannelInfoCreateReq) error {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/info", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opChannelInfo, "/channel/info", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -227,7 +226,7 @@ func (c *Context) IMCreateOrUpdateChannelInfo(req *ChannelInfoCreateReq) error {
 
 // IMCreateOrUpdateChannel 请求IM创建或更新频道
 func (c *Context) IMCreateOrUpdateChannel(req *ChannelCreateReq) error {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opChannelCreate, "/channel", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -237,7 +236,7 @@ func (c *Context) IMCreateOrUpdateChannel(req *ChannelCreateReq) error {
 // IMBlacklistAdd 添加黑名单
 func (c *Context) IMBlacklistAdd(req ChannelBlacklistReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/blacklist_add", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opBlacklistAdd, "/channel/blacklist_add", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -247,7 +246,7 @@ func (c *Context) IMBlacklistAdd(req ChannelBlacklistReq) error {
 // IMBlacklistSet 设置黑名单
 func (c *Context) IMBlacklistSet(req ChannelBlacklistReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/blacklist_set", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opBlacklistSet, "/channel/blacklist_set", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -257,7 +256,7 @@ func (c *Context) IMBlacklistSet(req ChannelBlacklistReq) error {
 // IMBlacklistRemove 移除黑名单
 func (c *Context) IMBlacklistRemove(req ChannelBlacklistReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/blacklist_remove", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opBlacklistRemove, "/channel/blacklist_remove", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -267,7 +266,7 @@ func (c *Context) IMBlacklistRemove(req ChannelBlacklistReq) error {
 // IMWhitelistAdd 添加白名单
 func (c *Context) IMWhitelistAdd(req ChannelWhitelistReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/whitelist_add", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opWhitelistAdd, "/channel/whitelist_add", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -277,7 +276,7 @@ func (c *Context) IMWhitelistAdd(req ChannelWhitelistReq) error {
 // IMWhitelistSet 白名单设置（覆盖旧的数据）
 func (c *Context) IMWhitelistSet(req ChannelWhitelistReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/whitelist_set", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opWhitelistSet, "/channel/whitelist_set", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -287,7 +286,7 @@ func (c *Context) IMWhitelistSet(req ChannelWhitelistReq) error {
 // IMWhitelistRemove 移除白名单
 func (c *Context) IMWhitelistRemove(req ChannelWhitelistReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/whitelist_remove", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opWhitelistRemove, "/channel/whitelist_remove", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -297,7 +296,7 @@ func (c *Context) IMWhitelistRemove(req ChannelWhitelistReq) error {
 // IMAddSubscriber 请求IM创建频道
 func (c *Context) IMAddSubscriber(req *SubscriberAddReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/subscriber_add", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSubscriberAdd, "/channel/subscriber_add", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -310,7 +309,7 @@ func (c *Context) IMAddSubscriber(req *SubscriberAddReq) error {
 // IMRemoveSubscriber 请求IM创建频道
 func (c *Context) IMRemoveSubscriber(req *SubscriberRemoveReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/subscriber_remove", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSubscriberRemove, "/channel/subscriber_remove", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -320,9 +319,9 @@ func (c *Context) IMRemoveSubscriber(req *SubscriberRemoveReq) error {
 // IMGetConversations 获取用户最近会话列表
 func (c *Context) IMGetConversations(uid string) ([]*ConversationResp, error) {
 
-	resp, err := network.Get(c.cfg.WuKongIM.APIURL+"/conversations", map[string]string{
+	resp, err := c.imGet(opGetConversations, "/conversations", map[string]string{
 		"uid": uid,
-	}, c.wkIMManagerTokenHeader())
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +340,7 @@ func (c *Context) IMGetConversations(uid string) ([]*ConversationResp, error) {
 // IMClearConversationUnread 清除用户某个频道的未读数
 func (c *Context) IMClearConversationUnread(req ClearConversationUnreadReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/conversations/setUnread", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opConversationSetUnread, "/conversations/setUnread", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -351,7 +350,7 @@ func (c *Context) IMClearConversationUnread(req ClearConversationUnreadReq) erro
 // IMDeleteConversation 删除最近会话
 func (c *Context) IMDeleteConversation(req DeleteConversationReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/conversations/delete", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opConversationDelete, "/conversations/delete", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -361,13 +360,13 @@ func (c *Context) IMDeleteConversation(req DeleteConversationReq) error {
 // IMSyncUserConversation 同步用户会话数据
 func (c *Context) IMSyncUserConversation(uid string, version int64, msgCount int64, lastMsgSeqs string, larges []*Channel) ([]*SyncUserConversationResp, error) {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/conversation/sync", []byte(util.ToJson(map[string]interface{}{
+	resp, err := c.imPost(opConversationSync, "/conversation/sync", []byte(util.ToJson(map[string]interface{}{
 		"uid":           uid,
 		"version":       version,
 		"last_msg_seqs": lastMsgSeqs,
 		"msg_count":     msgCount,
 		"larges":        larges,
-	})), c.wkIMManagerTokenHeader())
+	})))
 	if err != nil {
 		return nil, err
 	}
@@ -399,10 +398,10 @@ func (c *Context) IMSyncUserConversation(uid string, version int64, msgCount int
 
 // IMGetChannelMaxSeq
 func (c *Context) IMGetChannelMaxSeq(channelID string, channelType uint8) (*ChannelMaxSeqResp, error) {
-	resp, err := network.Get(c.cfg.WuKongIM.APIURL+"/channel/max_message_seq", map[string]string{
+	resp, err := c.imGet(opChannelMaxSeq, "/channel/max_message_seq", map[string]string{
 		"channel_id":   channelID,
 		"channel_type": fmt.Sprintf("%d", channelType),
-	}, c.wkIMManagerTokenHeader())
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +425,7 @@ func (c *Context) IMGetWithChannelAndSeqs(channelID string, channelType uint8, l
 		"message_seqs": seqs,
 		"login_uid":    loginUID,
 	}
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/messages", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opGetChannelMessages, "/messages", []byte(util.ToJson(req)))
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +444,7 @@ func (c *Context) IMGetWithChannelAndSeqs(channelID string, channelType uint8, l
 // IMSyncChannelMessage 同步频道消息
 func (c *Context) IMSyncChannelMessage(req SyncChannelMessageReq) (*SyncChannelMessageResp, error) {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/messagesync", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSyncChannelMessage, "/channel/messagesync", []byte(util.ToJson(req)))
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +463,7 @@ func (c *Context) IMSyncChannelMessage(req SyncChannelMessageReq) (*SyncChannelM
 // IMSyncMessage 同步IM消息
 func (c *Context) IMSyncMessage(req *MsgSyncReq) ([]*MessageResp, error) {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/message/sync", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSyncMessage, "/message/sync", []byte(util.ToJson(req)))
 	if err != nil {
 		return nil, err
 	}
@@ -483,7 +482,7 @@ func (c *Context) IMSyncMessage(req *MsgSyncReq) ([]*MessageResp, error) {
 // IMSyncMessageAck 同步IM消息回执
 func (c *Context) IMSyncMessageAck(req *SyncackReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/message/syncack", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSyncMessageAck, "/message/syncack", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -503,7 +502,7 @@ func (c *Context) IMSyncMessageAck(req *SyncackReq) error {
 // IMRevokeMessage 撤回IM消息
 func (c *Context) IMRevokeMessage(req *MessageRevokeReq) error {
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/message/revoke", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opRevokeMessage, "/message/revoke", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -512,7 +511,7 @@ func (c *Context) IMRevokeMessage(req *MessageRevokeReq) error {
 
 // IMDelChannel 删除频道
 func (c *Context) IMDelChannel(req *ChannelDeleteReq) error {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/channel/delete", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opChannelDelete, "/channel/delete", []byte(util.ToJson(req)))
 	if err != nil {
 		return err
 	}
@@ -521,7 +520,7 @@ func (c *Context) IMDelChannel(req *ChannelDeleteReq) error {
 
 // IMSearchUserMessages 搜索用户消息
 func (c *Context) IMSearchUserMessages(req *SearchUserMessageReq) (*SearchUserMessageResp, error) {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/plugins/wk.plugin.search/usersearch", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSearchUserMessages, "/plugins/wk.plugin.search/usersearch", []byte(util.ToJson(req)))
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +538,7 @@ func (c *Context) IMSearchUserMessages(req *SearchUserMessageReq) (*SearchUserMe
 
 // IMGetWithMessageID 根据消息ID获取消息详情
 func (c *Context) IMSearchMessages(req *MsgSearchReq) (*SyncChannelMessageResp, error) {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/messages", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opSearchMessages, "/messages", []byte(util.ToJson(req)))
 	if err != nil {
 		return nil, err
 	}
@@ -708,7 +707,7 @@ func (c *Context) IMSOnlineStatus(uids []string) ([]*OnlinestatusResp, error) {
 		c.Info("获取指定用户的在线状态", zap.String("req", util.ToJson(uids)))
 		return nil, nil
 	}
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/user/onlinestatus", []byte(util.ToJson(uids)), c.wkIMManagerTokenHeader())
+	resp, err := c.imPost(opUserOnlineStatus, "/user/onlinestatus", []byte(util.ToJson(uids)))
 	if err != nil {
 		return nil, err
 	}
