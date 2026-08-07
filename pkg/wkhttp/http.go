@@ -421,15 +421,24 @@ func (r *RouterGroup) PUT(relativePath string, handlers ...HandlerFunc) {
 //   - X-Octo-Lang: 客户端显式覆盖语言（优先级高于 Accept-Language）
 //   - Accept-Language: 标准协商语言头
 //
+// 以及扫码登录的轮询凭据头：
+//   - X-Scan-Poll-Secret: GET /v1/user/loginstatus 的轮询密钥。只有持有它的调用方才能
+//     从二维码状态里读到 auth_code —— 走请求头而非 query 是为了让明文不进 access log。
+//
 // ExposeHeaders 是新增字段（历史 CORSMiddleware 完全没有这一行）：
 //   - Content-Language: 实际返回的响应语言，浏览器可读
 //   - Vary: 让代理 / 浏览器按语言变体缓存
+//
+// 注意这份 AllowHeaders 清单是**写死**的，且 OPTIONS 分支设置完就立刻
+// AbortWithStatus(204)、response header 当场 flush —— 下游仓库无论把自己的中间件挂在
+// 本中间件之前还是之后都改不动它。所以任何新的自定义请求头都必须在这里登记，否则跨源
+// 浏览器的预检直接拒掉整个请求（不是降级，是真正的请求根本发不出去）。
 func CORSMiddleware() HandlerFunc {
 
 	return func(c *Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, token, accept, origin, Cache-Control, X-Requested-With, appid, noncestr, sign, timestamp, X-Octo-Error-Envelope, X-Octo-Lang, Accept-Language")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, token, accept, origin, Cache-Control, X-Requested-With, appid, noncestr, sign, timestamp, X-Octo-Error-Envelope, X-Octo-Lang, Accept-Language, X-Scan-Poll-Secret")
 		c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Language, Vary")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT,DELETE,PATCH")
 
