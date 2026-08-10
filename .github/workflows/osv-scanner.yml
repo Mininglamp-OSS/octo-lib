@@ -45,7 +45,7 @@ jobs:
     # We don't consume those outputs, so leaving export-results at its default
     # (false) removes the oversized output. Inner actions remain v2.3.8.
     # Revert to a release tag once one ships that includes this fix (post-v2.3.8).
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@3a7550f43ba5b58905a821ce3a0ed24c4858b3f4  # export-results gating, inner actions v2.3.8
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@f4cfcc01edc9c8b756a9b873b7a623ca674da51e  # export-results gating, inner actions v2.3.8
     with:
       scan-args: |-
         -r
