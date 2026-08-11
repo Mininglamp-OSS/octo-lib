@@ -203,8 +203,11 @@ func setRateLimitHeaders(h http.Header, scope string, burst, remaining int, allo
 // 策略层阻断直连。该语义也不同于 gin.Context.ClientIP；安全路径应显式调用本函数。
 func ClientIP(r *http.Request) string {
 	if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {
-		parts := strings.Split(values[len(values)-1], ",")
-		candidate := strings.TrimSpace(parts[len(parts)-1])
+		last := values[len(values)-1]
+		if i := strings.LastIndexByte(last, ','); i >= 0 {
+			last = last[i+1:]
+		}
+		candidate := strings.TrimSpace(last)
 		if candidate == "" {
 			return ""
 		}
