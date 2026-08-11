@@ -27,6 +27,8 @@ func GetExternalIP() (string, error) {
 
 // GetClientPublicIP 尽最大努力实现获取客户端公网 IP 的算法。
 // 解析 X-Real-IP 和 X-Forwarded-For 以便于反向代理（nginx 或 haproxy）可以正常工作。
+// 本函数保留展示和地理位置场景的兼容语义；安全敏感的限流或审计归因应使用
+// pkg/wkhttp.ClientIP，并满足其受信代理契约。
 func GetClientPublicIP(r *http.Request) string {
 	var ip string
 	for _, ip = range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {

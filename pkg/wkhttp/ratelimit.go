@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -184,29 +185,56 @@ func setRateLimitHeaders(h http.Header, scope string, burst, remaining int, allo
 	}
 }
 
-// getClientIP 从请求头按优先级取客户端 IP。
-// 生产架构为腾讯云 CLB 直连 Pod（pass-to-target），单层代理，XFF 只含客户端真实 IP。
-// 若未来新增 CDN 或多层反代，需重新评估 rightmost XFF 的取值是否正确。
+// ClientIP returns a canonical client IP selected for security-sensitive rate
+// limiting and audit attribution behind one trusted reverse proxy.
+//
+// X-Forwarded-For is authoritative when present: the proxy must append the
+// actual source as the rightmost entry, either to the comma-separated final
+// field line or as a new final field line. X-Real-Ip is only a fallback and
+// duplicate X-Real-Ip fields fail closed. Invalid candidates return an empty
+// string so callers can use their shared unknown-IP bucket.
+//
+// 生产架构为腾讯云 CLB 直连 Pod（pass-to-target）的单层代理。若未来新增 CDN 或
+// 多层反代，需重新评估 rightmost XFF 的取值是否正确。
 //
 // ⚠️ 信任假设（部署方必须保证）：本函数直接信任 X-Real-Ip / X-Forwarded-For。
-// 仅当上游存在受信反代（CLB / Nginx / Envoy 等）会**剥离客户端伪造的同名头**
-// 并写入真实客户端 IP 时，per-IP 限流才有效。若服务对外暴露时绕过反代直连，
-// 客户端可任意伪造这两个头绕过限流——部署方需在反代/网络策略层面阻断。
-// 复用本中间件的新服务务必校验该前提。
-func getClientIP(r *http.Request) string {
-	if ip := strings.TrimSpace(r.Header.Get("X-Real-Ip")); ip != "" {
-		return ip
+// 仅当受信反代遵守上述 header 契约，且服务无法绕过反代直连时，per-IP 限流和审计
+// 归因才有效。否则客户端可伪造这两个头绕过限流并污染审计，部署方必须在反代和网络
+// 策略层阻断直连。该语义也不同于 gin.Context.ClientIP；安全路径应显式调用本函数。
+func ClientIP(r *http.Request) string {
+	if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {
+		last := values[len(values)-1]
+		if i := strings.LastIndexByte(last, ','); i >= 0 {
+			last = last[i+1:]
+		}
+		candidate := strings.TrimSpace(last)
+		if candidate == "" {
+			return ""
+		}
+		return canonicalClientIP(candidate)
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
-			return ip
+
+	if values := r.Header.Values("X-Real-Ip"); len(values) > 0 {
+		if len(values) != 1 {
+			return ""
+		}
+		if candidate := strings.TrimSpace(values[0]); candidate != "" {
+			return canonicalClientIP(candidate)
 		}
 	}
+
 	if ip, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err == nil {
-		return ip
+		return canonicalClientIP(ip)
 	}
 	return ""
+}
+
+func canonicalClientIP(value string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(value))
+	if err != nil || addr.Zone() != "" {
+		return ""
+	}
+	return addr.Unmap().String()
 }
 
 // rateLimitErrorSpec 构造限流错误描述。所有三个限流中间件共用。
@@ -248,7 +276,7 @@ func (l *WKHttp) RateLimitMiddleware(ctx context.Context, client *rd.Client, rps
 		}
 
 		// fail-closed: 拿不到 IP 时走全局桶，不放行
-		ip := getClientIP(c.Request)
+		ip := ClientIP(c.Request)
 		if ip == "" {
 			unknownIPWarnOnce.Do(func() {
 				log.Warn("rate limit: client IP unavailable, falling back to shared bucket; check reverse proxy / XFF configuration")
@@ -293,7 +321,7 @@ func (l *WKHttp) StrictIPRateLimitMiddleware(ctx context.Context, client *rd.Cli
 	var unknownIPWarnOnce sync.Once
 
 	return func(c *Context) {
-		ip := getClientIP(c.Request)
+		ip := ClientIP(c.Request)
 		if ip == "" {
 			unknownIPWarnOnce.Do(func() {
 				log.Warn("strict rate limit: client IP unavailable, falling back to shared bucket; check reverse proxy / XFF configuration")

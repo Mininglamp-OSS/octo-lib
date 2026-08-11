@@ -40,6 +40,175 @@ func cleanRateLimitKeys(t *testing.T, c *rd.Client) {
 	}
 }
 
+func TestClientIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		headers    http.Header
+		remoteAddr string
+		want       string
+	}{
+		{
+			name: "rightmost xff has priority over x-real-ip",
+			headers: http.Header{
+				"X-Forwarded-For": {"203.0.113.10, 198.51.100.24"},
+				"X-Real-Ip":       {"192.0.2.10"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "trusted proxy comma-appends actual ip to xff",
+			headers: http.Header{
+				"X-Forwarded-For": {"203.0.113.10,  198.51.100.24 "},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "trusted proxy appends a second xff field line",
+			headers: http.Header{
+				"X-Forwarded-For": {"203.0.113.10", "198.51.100.24"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "oversized xff prefix keeps trusted rightmost ip",
+			headers: http.Header{
+				"X-Forwarded-For": {strings.Repeat(",", 64<<10) + "198.51.100.24"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "duplicate x-real-ip without xff fails closed",
+			headers: http.Header{
+				"X-Real-Ip": {"203.0.113.10", "198.51.100.24"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name: "whitespace x-real-ip falls back to remote address",
+			headers: http.Header{
+				"X-Real-Ip": {"  "},
+			},
+			remoteAddr: "198.51.100.24:8080",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "invalid xff fails closed instead of trusting x-real-ip",
+			headers: http.Header{
+				"X-Forwarded-For": {"203.0.113.10, not-an-ip"},
+				"X-Real-Ip":       {"192.0.2.10"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name: "sentinel collision input fails closed",
+			headers: http.Header{
+				"X-Real-Ip": {unknownIPKey},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name: "oversized header input fails closed",
+			headers: http.Header{
+				"X-Real-Ip": {strings.Repeat("a", 4096)},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name: "ipv6 xff is canonicalized",
+			headers: http.Header{
+				"X-Forwarded-For": {"2001:0DB8:0000:0000:0000:0000:0000:0001"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "2001:db8::1",
+		},
+		{
+			name: "ipv4-mapped ipv6 is unmapped",
+			headers: http.Header{
+				"X-Forwarded-For": {"::ffff:192.0.2.10"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "192.0.2.10",
+		},
+		{
+			name: "ipv6 zone identifier fails closed",
+			headers: http.Header{
+				"X-Forwarded-For": {"fe80::1%eth0"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name:       "ipv4 remote address fallback",
+			remoteAddr: "198.51.100.24:8080",
+			want:       "198.51.100.24",
+		},
+		{
+			name:       "empty rightmost xff fails closed",
+			headers:    http.Header{"X-Forwarded-For": {"203.0.113.10,  "}},
+			remoteAddr: "198.51.100.24:8080",
+			want:       "",
+		},
+		{
+			name:       "ipv6 remote address fallback",
+			remoteAddr: "[2001:db8::24]:8080",
+			want:       "2001:db8::24",
+		},
+		{
+			name:       "unusable remote address without port",
+			remoteAddr: "not-an-address",
+			want:       "",
+		},
+		{
+			name:       "non-ip remote host fails closed",
+			remoteAddr: "not-an-ip:443",
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tt.remoteAddr
+			for name, values := range tt.headers {
+				for _, value := range values {
+					req.Header.Add(name, value)
+				}
+			}
+
+			if got := ClientIP(req); got != tt.want {
+				t.Fatalf("ClientIP() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClientIPOversizedXFFAllocationsBounded(t *testing.T) {
+	const want = "198.51.100.24"
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Forwarded-For", strings.Repeat(",", 64<<10)+want)
+
+	result := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if got := ClientIP(req); got != want {
+				b.Fatalf("ClientIP() = %q, want %q", got, want)
+			}
+		}
+	})
+
+	const maxBytesPerOp = 128 << 10
+	if got := result.AllocedBytesPerOp(); got > maxBytesPerOp {
+		t.Fatalf("ClientIP() allocated %d bytes/op for oversized XFF, want <= %d", got, maxBytesPerOp)
+	}
+}
+
 // TestNewKeyedLimiterRejectsInvalidConfig 验证启动期校验：rps<=0 或 burst<=0
 // 触发 panic（loud-fast），防止配置错误悄悄变成 100% 429（Lua fail-closed 早返回）。
 func TestNewKeyedLimiterRejectsInvalidConfig(t *testing.T) {
