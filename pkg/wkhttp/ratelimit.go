@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -184,28 +185,51 @@ func setRateLimitHeaders(h http.Header, scope string, burst, remaining int, allo
 	}
 }
 
-// ClientIP 从请求头按优先级取客户端 IP。
-// 生产架构为腾讯云 CLB 直连 Pod（pass-to-target）的单层代理：CLB 必须覆盖或剥离
-// 客户端传入的 X-Real-Ip，并把实际来源追加为 XFF 最右项。若未来新增 CDN 或多层
-// 反代，需重新评估 rightmost XFF 的取值是否正确。
+// ClientIP returns a canonical client IP selected for security-sensitive rate
+// limiting and audit attribution behind one trusted reverse proxy.
+//
+// X-Forwarded-For is authoritative when present: the proxy must append the
+// actual source as the rightmost entry, either to the comma-separated final
+// field line or as a new final field line. X-Real-Ip is only a fallback and
+// duplicate X-Real-Ip fields fail closed. Invalid candidates return an empty
+// string so callers can use their shared unknown-IP bucket.
+//
+// 生产架构为腾讯云 CLB 直连 Pod（pass-to-target）的单层代理。若未来新增 CDN 或
+// 多层反代，需重新评估 rightmost XFF 的取值是否正确。
 //
 // ⚠️ 信任假设（部署方必须保证）：本函数直接信任 X-Real-Ip / X-Forwarded-For。
-// 仅当受信反代遵守上述 header 契约，且服务无法绕过反代直连时，per-IP 限流和
-// 审计归因才有效。复用本函数的新服务务必校验该前提。
+// 仅当受信反代遵守上述 header 契约，且服务无法绕过反代直连时，per-IP 限流和审计
+// 归因才有效。否则客户端可伪造这两个头绕过限流并污染审计，部署方必须在反代和网络
+// 策略层阻断直连。该语义也不同于 gin.Context.ClientIP；安全路径应显式调用本函数。
 func ClientIP(r *http.Request) string {
-	if ip := strings.TrimSpace(r.Header.Get("X-Real-Ip")); ip != "" {
-		return ip
-	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
-			return ip
+	if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {
+		parts := strings.Split(values[len(values)-1], ",")
+		if candidate := strings.TrimSpace(parts[len(parts)-1]); candidate != "" {
+			return canonicalClientIP(candidate)
 		}
 	}
+
+	if values := r.Header.Values("X-Real-Ip"); len(values) > 0 {
+		if len(values) != 1 {
+			return ""
+		}
+		if candidate := strings.TrimSpace(values[0]); candidate != "" {
+			return canonicalClientIP(candidate)
+		}
+	}
+
 	if ip, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err == nil {
-		return ip
+		return canonicalClientIP(ip)
 	}
 	return ""
+}
+
+func canonicalClientIP(value string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(value))
+	if err != nil || addr.Zone() != "" {
+		return ""
+	}
+	return addr.Unmap().String()
 }
 
 // rateLimitErrorSpec 构造限流错误描述。所有三个限流中间件共用。
