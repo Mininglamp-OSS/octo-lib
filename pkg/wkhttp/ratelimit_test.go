@@ -73,6 +73,14 @@ func TestClientIP(t *testing.T) {
 			want:       "198.51.100.24",
 		},
 		{
+			name: "oversized xff prefix keeps trusted rightmost ip",
+			headers: http.Header{
+				"X-Forwarded-For": {strings.Repeat(",", 64<<10) + "198.51.100.24"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
 			name: "duplicate x-real-ip without xff fails closed",
 			headers: http.Header{
 				"X-Real-Ip": {"203.0.113.10", "198.51.100.24"},
@@ -179,6 +187,25 @@ func TestClientIP(t *testing.T) {
 				t.Fatalf("ClientIP() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClientIPOversizedXFFAllocationsBounded(t *testing.T) {
+	const want = "198.51.100.24"
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Forwarded-For", strings.Repeat(",", 64<<10)+want)
+
+	result := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if got := ClientIP(req); got != want {
+				b.Fatalf("ClientIP() = %q, want %q", got, want)
+			}
+		}
+	})
+
+	const maxBytesPerOp = 128 << 10
+	if got := result.AllocedBytesPerOp(); got > maxBytesPerOp {
+		t.Fatalf("ClientIP() allocated %d bytes/op for oversized XFF, want <= %d", got, maxBytesPerOp)
 	}
 }
 
