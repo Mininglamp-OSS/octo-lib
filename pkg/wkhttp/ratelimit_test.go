@@ -43,23 +43,99 @@ func cleanRateLimitKeys(t *testing.T, c *rd.Client) {
 func TestClientIP(t *testing.T) {
 	tests := []struct {
 		name       string
-		realIP     string
-		forwarded  string
+		headers    http.Header
 		remoteAddr string
 		want       string
 	}{
 		{
-			name:       "x-real-ip has priority",
-			realIP:     " 192.0.2.10 ",
-			forwarded:  "203.0.113.10, 198.51.100.24",
+			name: "rightmost xff has priority over x-real-ip",
+			headers: http.Header{
+				"X-Forwarded-For": {"203.0.113.10, 198.51.100.24"},
+				"X-Real-Ip":       {"192.0.2.10"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "trusted proxy comma-appends actual ip to xff",
+			headers: http.Header{
+				"X-Forwarded-For": {"203.0.113.10,  198.51.100.24 "},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "trusted proxy appends a second xff field line",
+			headers: http.Header{
+				"X-Forwarded-For": {"203.0.113.10", "198.51.100.24"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "duplicate x-real-ip without xff fails closed",
+			headers: http.Header{
+				"X-Real-Ip": {"203.0.113.10", "198.51.100.24"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name: "whitespace x-real-ip falls back to remote address",
+			headers: http.Header{
+				"X-Real-Ip": {"  "},
+			},
+			remoteAddr: "198.51.100.24:8080",
+			want:       "198.51.100.24",
+		},
+		{
+			name: "invalid xff fails closed instead of trusting x-real-ip",
+			headers: http.Header{
+				"X-Forwarded-For": {"203.0.113.10, not-an-ip"},
+				"X-Real-Ip":       {"192.0.2.10"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name: "sentinel collision input fails closed",
+			headers: http.Header{
+				"X-Real-Ip": {unknownIPKey},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name: "oversized header input fails closed",
+			headers: http.Header{
+				"X-Real-Ip": {strings.Repeat("a", 4096)},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "",
+		},
+		{
+			name: "ipv6 xff is canonicalized",
+			headers: http.Header{
+				"X-Forwarded-For": {"2001:0DB8:0000:0000:0000:0000:0000:0001"},
+			},
+			remoteAddr: "10.0.0.5:443",
+			want:       "2001:db8::1",
+		},
+		{
+			name: "ipv4-mapped ipv6 is unmapped",
+			headers: http.Header{
+				"X-Forwarded-For": {"::ffff:192.0.2.10"},
+			},
 			remoteAddr: "10.0.0.5:443",
 			want:       "192.0.2.10",
 		},
 		{
-			name:       "trusted proxy appends actual ip to xff",
-			forwarded:  "203.0.113.10,  198.51.100.24 ",
+			name: "ipv6 zone identifier fails closed",
+			headers: http.Header{
+				"X-Forwarded-For": {"fe80::1%eth0"},
+			},
 			remoteAddr: "10.0.0.5:443",
-			want:       "198.51.100.24",
+			want:       "",
 		},
 		{
 			name:       "ipv4 remote address fallback",
@@ -68,7 +144,7 @@ func TestClientIP(t *testing.T) {
 		},
 		{
 			name:       "empty rightmost xff falls back to remote address",
-			forwarded:  "203.0.113.10,  ",
+			headers:    http.Header{"X-Forwarded-For": {"203.0.113.10,  "}},
 			remoteAddr: "198.51.100.24:8080",
 			want:       "198.51.100.24",
 		},
@@ -78,8 +154,13 @@ func TestClientIP(t *testing.T) {
 			want:       "2001:db8::24",
 		},
 		{
-			name:       "unusable remote address",
+			name:       "unusable remote address without port",
 			remoteAddr: "not-an-address",
+			want:       "",
+		},
+		{
+			name:       "non-ip remote host fails closed",
+			remoteAddr: "not-an-ip:443",
 			want:       "",
 		},
 	}
@@ -88,11 +169,10 @@ func TestClientIP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = tt.remoteAddr
-			if tt.realIP != "" {
-				req.Header.Set("X-Real-Ip", tt.realIP)
-			}
-			if tt.forwarded != "" {
-				req.Header.Set("X-Forwarded-For", tt.forwarded)
+			for name, values := range tt.headers {
+				for _, value := range values {
+					req.Header.Add(name, value)
+				}
 			}
 
 			if got := ClientIP(req); got != tt.want {
