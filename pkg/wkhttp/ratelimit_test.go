@@ -40,6 +40,68 @@ func cleanRateLimitKeys(t *testing.T, c *rd.Client) {
 	}
 }
 
+func TestClientIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		realIP     string
+		forwarded  string
+		remoteAddr string
+		want       string
+	}{
+		{
+			name:       "x-real-ip has priority",
+			realIP:     " 192.0.2.10 ",
+			forwarded:  "203.0.113.10, 198.51.100.24",
+			remoteAddr: "10.0.0.5:443",
+			want:       "192.0.2.10",
+		},
+		{
+			name:       "trusted proxy appends actual ip to xff",
+			forwarded:  "203.0.113.10,  198.51.100.24 ",
+			remoteAddr: "10.0.0.5:443",
+			want:       "198.51.100.24",
+		},
+		{
+			name:       "ipv4 remote address fallback",
+			remoteAddr: "198.51.100.24:8080",
+			want:       "198.51.100.24",
+		},
+		{
+			name:       "empty rightmost xff falls back to remote address",
+			forwarded:  "203.0.113.10,  ",
+			remoteAddr: "198.51.100.24:8080",
+			want:       "198.51.100.24",
+		},
+		{
+			name:       "ipv6 remote address fallback",
+			remoteAddr: "[2001:db8::24]:8080",
+			want:       "2001:db8::24",
+		},
+		{
+			name:       "unusable remote address",
+			remoteAddr: "not-an-address",
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tt.remoteAddr
+			if tt.realIP != "" {
+				req.Header.Set("X-Real-Ip", tt.realIP)
+			}
+			if tt.forwarded != "" {
+				req.Header.Set("X-Forwarded-For", tt.forwarded)
+			}
+
+			if got := ClientIP(req); got != tt.want {
+				t.Fatalf("ClientIP() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestNewKeyedLimiterRejectsInvalidConfig 验证启动期校验：rps<=0 或 burst<=0
 // 触发 panic（loud-fast），防止配置错误悄悄变成 100% 429（Lua fail-closed 早返回）。
 func TestNewKeyedLimiterRejectsInvalidConfig(t *testing.T) {

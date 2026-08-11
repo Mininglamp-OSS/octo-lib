@@ -184,16 +184,15 @@ func setRateLimitHeaders(h http.Header, scope string, burst, remaining int, allo
 	}
 }
 
-// getClientIP 从请求头按优先级取客户端 IP。
-// 生产架构为腾讯云 CLB 直连 Pod（pass-to-target），单层代理，XFF 只含客户端真实 IP。
-// 若未来新增 CDN 或多层反代，需重新评估 rightmost XFF 的取值是否正确。
+// ClientIP 从请求头按优先级取客户端 IP。
+// 生产架构为腾讯云 CLB 直连 Pod（pass-to-target）的单层代理：CLB 必须覆盖或剥离
+// 客户端传入的 X-Real-Ip，并把实际来源追加为 XFF 最右项。若未来新增 CDN 或多层
+// 反代，需重新评估 rightmost XFF 的取值是否正确。
 //
 // ⚠️ 信任假设（部署方必须保证）：本函数直接信任 X-Real-Ip / X-Forwarded-For。
-// 仅当上游存在受信反代（CLB / Nginx / Envoy 等）会**剥离客户端伪造的同名头**
-// 并写入真实客户端 IP 时，per-IP 限流才有效。若服务对外暴露时绕过反代直连，
-// 客户端可任意伪造这两个头绕过限流——部署方需在反代/网络策略层面阻断。
-// 复用本中间件的新服务务必校验该前提。
-func getClientIP(r *http.Request) string {
+// 仅当受信反代遵守上述 header 契约，且服务无法绕过反代直连时，per-IP 限流和
+// 审计归因才有效。复用本函数的新服务务必校验该前提。
+func ClientIP(r *http.Request) string {
 	if ip := strings.TrimSpace(r.Header.Get("X-Real-Ip")); ip != "" {
 		return ip
 	}
@@ -248,7 +247,7 @@ func (l *WKHttp) RateLimitMiddleware(ctx context.Context, client *rd.Client, rps
 		}
 
 		// fail-closed: 拿不到 IP 时走全局桶，不放行
-		ip := getClientIP(c.Request)
+		ip := ClientIP(c.Request)
 		if ip == "" {
 			unknownIPWarnOnce.Do(func() {
 				log.Warn("rate limit: client IP unavailable, falling back to shared bucket; check reverse proxy / XFF configuration")
@@ -293,7 +292,7 @@ func (l *WKHttp) StrictIPRateLimitMiddleware(ctx context.Context, client *rd.Cli
 	var unknownIPWarnOnce sync.Once
 
 	return func(c *Context) {
-		ip := getClientIP(c.Request)
+		ip := ClientIP(c.Request)
 		if ip == "" {
 			unknownIPWarnOnce.Do(func() {
 				log.Warn("strict rate limit: client IP unavailable, falling back to shared bucket; check reverse proxy / XFF configuration")
