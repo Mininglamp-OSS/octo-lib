@@ -143,10 +143,10 @@ func TestClientIP(t *testing.T) {
 			want:       "198.51.100.24",
 		},
 		{
-			name:       "empty rightmost xff falls back to remote address",
+			name:       "empty rightmost xff fails closed",
 			headers:    http.Header{"X-Forwarded-For": {"203.0.113.10,  "}},
 			remoteAddr: "198.51.100.24:8080",
-			want:       "198.51.100.24",
+			want:       "",
 		},
 		{
 			name:       "ipv6 remote address fallback",
