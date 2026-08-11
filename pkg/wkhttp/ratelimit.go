@@ -204,9 +204,11 @@ func setRateLimitHeaders(h http.Header, scope string, burst, remaining int, allo
 func ClientIP(r *http.Request) string {
 	if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {
 		parts := strings.Split(values[len(values)-1], ",")
-		if candidate := strings.TrimSpace(parts[len(parts)-1]); candidate != "" {
-			return canonicalClientIP(candidate)
+		candidate := strings.TrimSpace(parts[len(parts)-1])
+		if candidate == "" {
+			return ""
 		}
+		return canonicalClientIP(candidate)
 	}
 
 	if values := r.Header.Values("X-Real-Ip"); len(values) > 0 {
