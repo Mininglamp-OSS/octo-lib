@@ -215,30 +215,46 @@ func messageSendErrorSentinel(kind MessageSendErrorKind) error {
 	}
 }
 
-// SendMessage sends a message without requiring a durable-result response.
-// Callers that need a final message ID and sequence must use
-// SendMessageWithResult and provide a stable ClientMsgNo.
+// SendMessage preserves the legacy /message/send behavior, including
+// successful non-persistent and command messages that have no message sequence.
 func (c *Context) SendMessage(req *MsgSendReq) error {
-	_, err := c.postMessage(req)
+	_, err := c.postMessage("/message/send", req)
 	return err
 }
 
-// SendMessageWithResult sends one message and only accepts a response that
-// proves the caller's ClientMsgNo has a final durable message ID and sequence.
+// SendMessageWithResult preserves the legacy result contract and accepts both
+// the historical top-level response and OCTO's compatibility data envelope.
 func (c *Context) SendMessageWithResult(req *MsgSendReq) (*MsgSendResp, error) {
-	resp, err := c.postMessage(req)
+	resp, err := c.postMessage("/message/send", req)
+	if err != nil {
+		return nil, err
+	}
+	return parseLegacyMessageSendSuccess(resp.Body)
+}
+
+// SendDurableMessageWithResult sends a persistent message through the strict
+// durable endpoint. A stable ClientMsgNo is required and a successful response
+// must prove the final message ID, sequence, and echoed idempotency key.
+func (c *Context) SendDurableMessageWithResult(req *MsgSendReq) (*MsgSendResp, error) {
+	if req == nil {
+		return nil, newMessageSendError(MessageSendErrorInvalidRequest, 0, errors.New("nil request"))
+	}
+	if strings.TrimSpace(req.ClientMsgNo) == "" {
+		return nil, newMessageSendError(MessageSendErrorInvalidRequest, 0, errors.New("client_msg_no is required"))
+	}
+	resp, err := c.postMessage("/message/send/durable", req)
 	if err != nil {
 		return nil, err
 	}
 	return parseMessageSendSuccess(resp.Body, req.ClientMsgNo)
 }
 
-func (c *Context) postMessage(req *MsgSendReq) (*rest.Response, error) {
+func (c *Context) postMessage(path string, req *MsgSendReq) (*rest.Response, error) {
 	if req == nil {
 		return nil, newMessageSendError(MessageSendErrorInvalidRequest, 0, errors.New("nil request"))
 	}
 
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/message/send", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := network.Post(c.cfg.WuKongIM.APIURL+path, []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
 	if err != nil {
 		return nil, newMessageSendError(MessageSendErrorTransportUnknown, 0, err)
 	}
@@ -249,6 +265,32 @@ func (c *Context) postMessage(req *MsgSendReq) (*rest.Response, error) {
 		return nil, newMessageSendError(MessageSendErrorIdempotencyConflict, resp.StatusCode, nil)
 	}
 	return nil, newMessageSendError(MessageSendErrorHTTPRejected, resp.StatusCode, nil)
+}
+
+func parseLegacyMessageSendSuccess(responseBody string) (*MsgSendResp, error) {
+	type messageSendData struct {
+		MessageID   int64  `json:"message_id"`
+		MessageSeq  uint32 `json:"message_seq"`
+		ClientMsgNo string `json:"client_msg_no"`
+	}
+	var response struct {
+		messageSendData
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(responseBody), &response); err != nil {
+		return nil, err
+	}
+	data := response.messageSendData
+	if len(response.Data) > 0 && string(response.Data) != "null" {
+		if err := json.Unmarshal(response.Data, &data); err != nil {
+			return nil, err
+		}
+	}
+	return &MsgSendResp{
+		MessageID:   data.MessageID,
+		MessageSeq:  data.MessageSeq,
+		ClientMsgNo: data.ClientMsgNo,
+	}, nil
 }
 
 func parseMessageSendSuccess(responseBody, expectedClientMsgNo string) (*MsgSendResp, error) {
