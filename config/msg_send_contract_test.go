@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-func TestSendMessageWithResult_PassesStableClientMessageNumber(t *testing.T) {
+func TestSendDurableMessageWithResult_PassesStableClientMessageNumber(t *testing.T) {
 	const clientMsgNo = "fedg0-event-123"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
-		if r.URL.Path != "/message/send" {
-			t.Fatalf("path = %s, want /message/send", r.URL.Path)
+		if r.URL.Path != "/message/send/durable" {
+			t.Fatalf("path = %s, want /message/send/durable", r.URL.Path)
 		}
 
 		var request MsgSendReq
@@ -38,21 +38,21 @@ func TestSendMessageWithResult_PassesStableClientMessageNumber(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := newMessageSendTestContext(server.URL).SendMessageWithResult(&MsgSendReq{
+	result, err := newMessageSendTestContext(server.URL).SendDurableMessageWithResult(&MsgSendReq{
 		ChannelID:   "fedg0_channel",
 		ChannelType: 2,
 		ClientMsgNo: clientMsgNo,
 		Payload:     []byte(`{"type":1,"content":"fedg0"}`),
 	})
 	if err != nil {
-		t.Fatalf("SendMessageWithResult() error = %v", err)
+		t.Fatalf("SendDurableMessageWithResult() error = %v", err)
 	}
 	if result.MessageID != 101 || result.MessageSeq != 7 || result.ClientMsgNo != clientMsgNo {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 }
 
-func TestSendMessageWithResult_RejectsInvalidSuccessResponse(t *testing.T) {
+func TestSendDurableMessageWithResult_RejectsInvalidSuccessResponse(t *testing.T) {
 	const clientMsgNo = "fedg0-event-456"
 
 	testCases := []struct {
@@ -94,7 +94,7 @@ func TestSendMessageWithResult_RejectsInvalidSuccessResponse(t *testing.T) {
 			}))
 			defer server.Close()
 
-			_, err := newMessageSendTestContext(server.URL).SendMessageWithResult(&MsgSendReq{
+			_, err := newMessageSendTestContext(server.URL).SendDurableMessageWithResult(&MsgSendReq{
 				ChannelID:   "fedg0_channel",
 				ChannelType: 2,
 				ClientMsgNo: clientMsgNo,
@@ -105,7 +105,7 @@ func TestSendMessageWithResult_RejectsInvalidSuccessResponse(t *testing.T) {
 	}
 }
 
-func TestSendMessageWithResult_ClassifiesNonSuccessOutcomes(t *testing.T) {
+func TestSendDurableMessageWithResult_ClassifiesNonSuccessOutcomes(t *testing.T) {
 	const clientMsgNo = "fedg0-event-789"
 
 	testCases := []struct {
@@ -125,7 +125,7 @@ func TestSendMessageWithResult_ClassifiesNonSuccessOutcomes(t *testing.T) {
 			}))
 			defer server.Close()
 
-			_, err := newMessageSendTestContext(server.URL).SendMessageWithResult(&MsgSendReq{
+			_, err := newMessageSendTestContext(server.URL).SendDurableMessageWithResult(&MsgSendReq{
 				ChannelID:   "fedg0_channel",
 				ChannelType: 2,
 				ClientMsgNo: clientMsgNo,
@@ -135,17 +135,77 @@ func TestSendMessageWithResult_ClassifiesNonSuccessOutcomes(t *testing.T) {
 	}
 }
 
-func TestSendMessageWithResult_ClassifiesTransportUnknown(t *testing.T) {
+func TestSendDurableMessageWithResult_ClassifiesTransportUnknown(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	serverURL := server.URL
 	server.Close()
 
-	_, err := newMessageSendTestContext(serverURL).SendMessageWithResult(&MsgSendReq{
+	_, err := newMessageSendTestContext(serverURL).SendDurableMessageWithResult(&MsgSendReq{
 		ChannelID:   "fedg0_channel",
 		ChannelType: 2,
 		ClientMsgNo: "fedg0-event-transport",
 	})
 	assertMessageSendErrorKind(t, err, "transport_unknown", ErrMessageSendTransportUnknown)
+}
+
+func TestSendMessagePreservesLegacyEndpointForNoPersist(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/message/send" {
+			t.Fatalf("path = %s, want /message/send", r.URL.Path)
+		}
+		writeMessageSendResponse(t, w, http.StatusOK, map[string]any{
+			"message_id":  0,
+			"message_seq": 0,
+			"reason":      1,
+		})
+	}))
+	defer server.Close()
+
+	err := newMessageSendTestContext(server.URL).SendMessage(&MsgSendReq{
+		Header:      MsgHeader{NoPersist: 1, SyncOnce: 1},
+		FromUID:     "u1",
+		ChannelID:   "u2",
+		ChannelType: 1,
+		Payload:     []byte(`{"type":1}`),
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+}
+
+func TestSendMessageWithResultAcceptsLegacyTopLevelResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/message/send" {
+			t.Fatalf("path = %s, want /message/send", r.URL.Path)
+		}
+		writeMessageSendResponse(t, w, http.StatusOK, map[string]any{
+			"message_id":    202,
+			"message_seq":   8,
+			"client_msg_no": "legacy-key",
+			"reason":        1,
+		})
+	}))
+	defer server.Close()
+
+	result, err := newMessageSendTestContext(server.URL).SendMessageWithResult(&MsgSendReq{
+		ClientMsgNo: "legacy-key",
+	})
+	if err != nil {
+		t.Fatalf("SendMessageWithResult() error = %v", err)
+	}
+	if result.MessageID != 202 || result.MessageSeq != 8 || result.ClientMsgNo != "legacy-key" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestSendDurableMessageWithResultRejectsMissingClientMessageNumberBeforeSend(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("durable request without client_msg_no must not be sent")
+	}))
+	defer server.Close()
+
+	_, err := newMessageSendTestContext(server.URL).SendDurableMessageWithResult(&MsgSendReq{})
+	assertMessageSendErrorKind(t, err, "invalid_request", ErrMessageSendInvalidRequest)
 }
 
 func newMessageSendTestContext(apiURL string) *Context {
