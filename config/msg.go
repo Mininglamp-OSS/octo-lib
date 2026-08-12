@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Mininglamp-OSS/octo-lib/common"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/network"
 	"github.com/Mininglamp-OSS/octo-lib/pkg/util"
 	"github.com/sendgrid/rest"
-	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -126,41 +126,201 @@ func (c *Context) SendMessageBatch(req *MsgSendBatch) error {
 
 }
 
-// SendMessage 发送消息
+// MessageSendErrorKind describes whether a failed manager send can be retried
+// with the same client_msg_no or requires caller intervention.
+type MessageSendErrorKind string
+
+const (
+	// MessageSendErrorTransportUnknown means the client cannot know whether the
+	// request reached WuKongIM. Callers must recover with the same client_msg_no.
+	MessageSendErrorTransportUnknown MessageSendErrorKind = "transport_unknown"
+	// MessageSendErrorHTTPRejected means WuKongIM returned a non-200 response.
+	MessageSendErrorHTTPRejected MessageSendErrorKind = "http_rejected"
+	// MessageSendErrorIdempotencyConflict means the same client_msg_no was used
+	// for a request with a different immutable message payload.
+	MessageSendErrorIdempotencyConflict MessageSendErrorKind = "idempotency_conflict"
+	// MessageSendErrorInvalidSuccessResponse means a 200 response did not prove
+	// that one durable message with the caller's idempotency key was committed.
+	MessageSendErrorInvalidSuccessResponse MessageSendErrorKind = "invalid_success_response"
+	// MessageSendErrorInvalidRequest means the library could not issue the
+	// request, for example because the request itself is nil.
+	MessageSendErrorInvalidRequest MessageSendErrorKind = "invalid_request"
+)
+
+var (
+	// ErrMessageSendTransportUnknown identifies an outcome that must be recovered
+	// by querying or retrying with the original client_msg_no.
+	ErrMessageSendTransportUnknown = errors.New("message send transport outcome unknown")
+	// ErrMessageSendHTTPRejected identifies a definite non-success HTTP response.
+	ErrMessageSendHTTPRejected = errors.New("message send rejected by IM")
+	// ErrMessageSendIdempotencyConflict identifies a 409 key/payload conflict.
+	ErrMessageSendIdempotencyConflict = errors.New("message send idempotency conflict")
+	// ErrMessageSendInvalidSuccessResponse identifies malformed or unverifiable
+	// HTTP 200 responses.
+	ErrMessageSendInvalidSuccessResponse = errors.New("message send invalid success response")
+	// ErrMessageSendInvalidRequest identifies a request rejected before it was sent.
+	ErrMessageSendInvalidRequest = errors.New("message send invalid request")
+)
+
+// MessageSendError carries the machine-readable class of a manager send error.
+// StatusCode is set only when WuKongIM returned an HTTP response.
+type MessageSendError struct {
+	Kind       MessageSendErrorKind
+	StatusCode int
+	cause      error
+}
+
+func (e *MessageSendError) Error() string {
+	if e.cause == nil {
+		return string(e.Kind)
+	}
+	return fmt.Sprintf("%s: %v", e.Kind, e.cause)
+}
+
+// Unwrap exposes both the error class and underlying transport or parse cause.
+func (e *MessageSendError) Unwrap() []error {
+	errorsToUnwrap := []error{messageSendErrorSentinel(e.Kind)}
+	if e.Kind == MessageSendErrorIdempotencyConflict {
+		errorsToUnwrap = append(errorsToUnwrap, ErrMessageSendHTTPRejected)
+	}
+	if e.cause != nil {
+		errorsToUnwrap = append(errorsToUnwrap, e.cause)
+	}
+	return errorsToUnwrap
+}
+
+// MessageSendErrorKind returns the stable error class for non-errors.Is callers.
+func (e *MessageSendError) MessageSendErrorKind() string {
+	return string(e.Kind)
+}
+
+func newMessageSendError(kind MessageSendErrorKind, statusCode int, cause error) *MessageSendError {
+	return &MessageSendError{Kind: kind, StatusCode: statusCode, cause: cause}
+}
+
+func messageSendErrorSentinel(kind MessageSendErrorKind) error {
+	switch kind {
+	case MessageSendErrorTransportUnknown:
+		return ErrMessageSendTransportUnknown
+	case MessageSendErrorHTTPRejected:
+		return ErrMessageSendHTTPRejected
+	case MessageSendErrorIdempotencyConflict:
+		return ErrMessageSendIdempotencyConflict
+	case MessageSendErrorInvalidSuccessResponse:
+		return ErrMessageSendInvalidSuccessResponse
+	case MessageSendErrorInvalidRequest:
+		return ErrMessageSendInvalidRequest
+	default:
+		return ErrMessageSendInvalidRequest
+	}
+}
+
+// SendMessage sends a message without requiring a durable-result response.
+// Callers that need a final message ID and sequence must use
+// SendMessageWithResult and provide a stable ClientMsgNo.
 func (c *Context) SendMessage(req *MsgSendReq) error {
-	_, err := c.SendMessageWithResult(req)
+	_, err := c.postMessage(req)
 	return err
 }
 
-// SendMessage 发送消息
+// SendMessageWithResult sends one message and only accepts a response that
+// proves the caller's ClientMsgNo has a final durable message ID and sequence.
 func (c *Context) SendMessageWithResult(req *MsgSendReq) (*MsgSendResp, error) {
-	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/message/send", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	resp, err := c.postMessage(req)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusBadRequest {
-			resultMap, err := util.JsonToMap(resp.Body)
-			if err != nil {
-				return nil, err
-			}
-			if resultMap != nil && resultMap["msg"] != nil {
-				return nil, fmt.Errorf("IM服务[SendMessage]失败！ -> %s", resultMap["msg"])
-			}
-		}
-		return nil, fmt.Errorf("IM服务[SendMessage]返回状态[%d]失败！", resp.StatusCode)
-	} else {
-		dataResult := gjson.Get(resp.Body, "data")
+	return parseMessageSendSuccess(resp.Body, req.ClientMsgNo)
+}
 
-		messageID := dataResult.Get("message_id").Int()
-		messageSeq := dataResult.Get("message_seq").Int()
-		clientMsgNo := dataResult.Get("client_msg_no").String()
-		return &MsgSendResp{
-			MessageID:   messageID,
-			MessageSeq:  uint32(messageSeq),
-			ClientMsgNo: clientMsgNo,
-		}, nil
+func (c *Context) postMessage(req *MsgSendReq) (*rest.Response, error) {
+	if req == nil {
+		return nil, newMessageSendError(MessageSendErrorInvalidRequest, 0, errors.New("nil request"))
 	}
+
+	resp, err := network.Post(c.cfg.WuKongIM.APIURL+"/message/send", []byte(util.ToJson(req)), c.wkIMManagerTokenHeader())
+	if err != nil {
+		return nil, newMessageSendError(MessageSendErrorTransportUnknown, 0, err)
+	}
+	if resp.StatusCode == http.StatusOK {
+		return resp, nil
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return nil, newMessageSendError(MessageSendErrorIdempotencyConflict, resp.StatusCode, nil)
+	}
+	return nil, newMessageSendError(MessageSendErrorHTTPRejected, resp.StatusCode, nil)
+}
+
+func parseMessageSendSuccess(responseBody, expectedClientMsgNo string) (*MsgSendResp, error) {
+	var envelope struct {
+		Status *int            `json:"status"`
+		Data   json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(responseBody), &envelope); err != nil {
+		return nil, invalidMessageSendSuccessResponse(err)
+	}
+	if envelope.Status == nil || *envelope.Status != http.StatusOK {
+		return nil, invalidMessageSendSuccessResponse(errors.New("missing or non-200 response status"))
+	}
+	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return nil, invalidMessageSendSuccessResponse(errors.New("missing response data"))
+	}
+
+	var data struct {
+		MessageID   json.Number `json:"message_id"`
+		MessageSeq  json.Number `json:"message_seq"`
+		ClientMsgNo string      `json:"client_msg_no"`
+	}
+	if err := json.Unmarshal(envelope.Data, &data); err != nil {
+		return nil, invalidMessageSendSuccessResponse(err)
+	}
+
+	messageID, err := parsePositiveInt64(data.MessageID, "message_id")
+	if err != nil {
+		return nil, invalidMessageSendSuccessResponse(err)
+	}
+	messageSeq, err := parsePositiveUint32(data.MessageSeq, "message_seq")
+	if err != nil {
+		return nil, invalidMessageSendSuccessResponse(err)
+	}
+	if data.ClientMsgNo == "" {
+		return nil, invalidMessageSendSuccessResponse(errors.New("missing client_msg_no"))
+	}
+	if data.ClientMsgNo != expectedClientMsgNo {
+		return nil, invalidMessageSendSuccessResponse(errors.New("client_msg_no does not match request"))
+	}
+
+	return &MsgSendResp{
+		MessageID:   messageID,
+		MessageSeq:  messageSeq,
+		ClientMsgNo: data.ClientMsgNo,
+	}, nil
+}
+
+func parsePositiveInt64(value json.Number, field string) (int64, error) {
+	if value == "" {
+		return 0, fmt.Errorf("missing %s", field)
+	}
+	parsed, err := strconv.ParseInt(string(value), 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("invalid %s", field)
+	}
+	return parsed, nil
+}
+
+func parsePositiveUint32(value json.Number, field string) (uint32, error) {
+	if value == "" {
+		return 0, fmt.Errorf("missing %s", field)
+	}
+	parsed, err := strconv.ParseUint(string(value), 10, 32)
+	if err != nil || parsed == 0 {
+		return 0, fmt.Errorf("invalid %s", field)
+	}
+	return uint32(parsed), nil
+}
+
+func invalidMessageSendSuccessResponse(cause error) *MessageSendError {
+	return newMessageSendError(MessageSendErrorInvalidSuccessResponse, http.StatusOK, cause)
 }
 
 // SendFriendApply 发送好友申请请求
@@ -796,14 +956,15 @@ type UserBaseVo struct {
 
 // MsgSendReq 发送消息请求
 type MsgSendReq struct {
-	Header      MsgHeader `json:"header"`       // 消息头
-	Setting     uint8     `json:"setting"`      // setting
-	FromUID     string    `json:"from_uid"`     // 模拟发送者的UID
-	ChannelID   string    `json:"channel_id"`   // 频道ID
-	ChannelType uint8     `json:"channel_type"` // 频道类型
-	StreamNo    string    `json:"stream_no"`    // 消息流号
-	Subscribers []string  `json:"subscribers"`  // 订阅者 如果此字段有值，表示消息只发给指定的订阅者
-	Payload     []byte    `json:"payload"`      // 消息内容
+	Header      MsgHeader `json:"header"`        // 消息头
+	Setting     uint8     `json:"setting"`       // setting
+	FromUID     string    `json:"from_uid"`      // 模拟发送者的UID
+	ChannelID   string    `json:"channel_id"`    // 频道ID
+	ChannelType uint8     `json:"channel_type"`  // 频道类型
+	ClientMsgNo string    `json:"client_msg_no"` // 调用方提供的稳定消息幂等键
+	StreamNo    string    `json:"stream_no"`     // 消息流号
+	Subscribers []string  `json:"subscribers"`   // 订阅者 如果此字段有值，表示消息只发给指定的订阅者
+	Payload     []byte    `json:"payload"`       // 消息内容
 }
 
 type MsgSendResp struct {

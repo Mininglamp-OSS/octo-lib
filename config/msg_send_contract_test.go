@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -99,7 +100,7 @@ func TestSendMessageWithResult_RejectsInvalidSuccessResponse(t *testing.T) {
 				ClientMsgNo: clientMsgNo,
 				Payload:     []byte(`{"type":1}`),
 			})
-			assertMessageSendErrorKind(t, err, "invalid_success_response")
+			assertMessageSendErrorKind(t, err, "invalid_success_response", ErrMessageSendInvalidSuccessResponse)
 		})
 	}
 }
@@ -111,9 +112,10 @@ func TestSendMessageWithResult_ClassifiesNonSuccessOutcomes(t *testing.T) {
 		name       string
 		statusCode int
 		wantKind   string
+		wantError  error
 	}{
-		{name: "idempotency conflict", statusCode: http.StatusConflict, wantKind: "idempotency_conflict"},
-		{name: "http rejection", statusCode: http.StatusForbidden, wantKind: "http_rejected"},
+		{name: "idempotency conflict", statusCode: http.StatusConflict, wantKind: "idempotency_conflict", wantError: ErrMessageSendIdempotencyConflict},
+		{name: "http rejection", statusCode: http.StatusForbidden, wantKind: "http_rejected", wantError: ErrMessageSendHTTPRejected},
 	}
 
 	for _, testCase := range testCases {
@@ -128,7 +130,7 @@ func TestSendMessageWithResult_ClassifiesNonSuccessOutcomes(t *testing.T) {
 				ChannelType: 2,
 				ClientMsgNo: clientMsgNo,
 			})
-			assertMessageSendErrorKind(t, err, testCase.wantKind)
+			assertMessageSendErrorKind(t, err, testCase.wantKind, testCase.wantError)
 		})
 	}
 }
@@ -143,7 +145,7 @@ func TestSendMessageWithResult_ClassifiesTransportUnknown(t *testing.T) {
 		ChannelType: 2,
 		ClientMsgNo: "fedg0-event-transport",
 	})
-	assertMessageSendErrorKind(t, err, "transport_unknown")
+	assertMessageSendErrorKind(t, err, "transport_unknown", ErrMessageSendTransportUnknown)
 }
 
 func newMessageSendTestContext(apiURL string) *Context {
@@ -161,7 +163,7 @@ func writeMessageSendResponse(t *testing.T, w http.ResponseWriter, statusCode in
 	}
 }
 
-func assertMessageSendErrorKind(t *testing.T, err error, want string) {
+func assertMessageSendErrorKind(t *testing.T, err error, want string, sentinel error) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("error = nil, want kind %q", want)
@@ -172,5 +174,8 @@ func assertMessageSendErrorKind(t *testing.T, err error, want string) {
 	}
 	if got := kind.MessageSendErrorKind(); got != want {
 		t.Fatalf("error kind = %q, want %q", got, want)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("errors.Is(%v, %v) = false", err, sentinel)
 	}
 }
