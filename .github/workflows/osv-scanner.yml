@@ -24,7 +24,7 @@ jobs:
     # This commit only adds the gating flag; the inner osv-scanner/reporter
     # actions stay pinned to v2.3.8. Revert to a release tag once one ships
     # that includes this fix (post-v2.3.8).
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@3a7550f43ba5b58905a821ce3a0ed24c4858b3f4  # export-results gating, inner actions v2.3.8
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@ffa0a5f39214d80778c9b494822d94d0d9668458  # export-results gating, inner actions v2.3.8
     with:
       scan-args: |-
         -r
